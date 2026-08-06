@@ -1,0 +1,21 @@
+{
+  "name": "pungmu-hoban3-sunlight",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "호반써밋 풍무 Ⅲ 3D 시간별 일조량 분석",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11"
+  }
+}

@@ -1,0 +1,289 @@
+/* Mobile-first and fluid: there is exactly one layout. Every size is expressed
+   in vw-driven clamp(), so a desktop window is the same screen stretched - no
+   breakpoints, no second column, nothing that only exists on one form factor. */
+:root {
+  --tx: #1a1d21;
+  --tx2: #8b9096;
+  --line: #e6e8ea;
+  --accent: #3d5afe;
+  --sel: #d9451d;
+  --track: #eef0f2;
+
+  /* one fluid scale: phone value at 360px wide, grows to the cap on desktop */
+  --pad: clamp(12px, 3.6vw, 28px);
+  --gap: clamp(14px, 3.2vw, 26px);
+  --fs-title: clamp(16px, 4.4vw, 24px);
+  --fs-body: clamp(13px, 3.5vw, 17px);
+  --fs-small: clamp(11px, 3vw, 14px);
+  --ctl-h: clamp(38px, 10.5vw, 52px);
+  --radius: clamp(6px, 1.6vw, 12px);
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  background: #fff;
+  color: var(--tx);
+  font: var(--fs-body) / 1.45 -apple-system, "Apple SD Gothic Neo", "Malgun Gothic",
+    "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
+
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+.wrap {
+  width: 100%;
+  height: 100%;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding: var(--pad);
+  gap: var(--gap);
+}
+
+/* ------------------------------------------------------------------ header */
+header {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  flex: 0 0 auto;
+}
+header h1 {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+/* --------------------------------------------------------------------- map */
+.mapbox {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 40vh;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #eef0f2;
+}
+.map { position: absolute; inset: 0; }
+.err {
+  position: absolute; inset: 0; margin: 0;
+  display: grid; place-items: center; text-align: center;
+  padding: var(--pad); color: #b4232a; font-size: var(--fs-small);
+}
+
+/* 3차 옥상에 칠한 주택형 색의 범례 - 동·호 배치도와 같은 색 */
+.types {
+  position: absolute;
+  z-index: 4; /* above the building canvas */
+  top: clamp(8px, 2vw, 16px);
+  right: clamp(8px, 2vw, 16px);
+  margin: 0;
+  padding: clamp(4px, 1.2vw, 8px) clamp(6px, 1.6vw, 10px);
+  list-style: none;
+  display: grid;
+  gap: clamp(2px, 0.6vw, 4px);
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: calc(var(--radius) * 0.8);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.14);
+  font-size: var(--fs-small);
+  color: var(--tx2);
+}
+.types li { display: flex; align-items: center; gap: 0.45em; }
+.types i {
+  width: 1.5em; height: 0.8em;
+  border: 1px solid rgba(70, 78, 90, 0.45);
+  border-radius: 2px;
+}
+
+.zoom {
+  position: absolute;
+  z-index: 4; /* above the building canvas */
+  right: clamp(8px, 2vw, 16px);
+  bottom: clamp(8px, 2vw, 16px);
+  display: flex;
+  flex-direction: column;
+  border-radius: calc(var(--radius) * 0.8);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
+}
+.zoom button {
+  width: var(--ctl-h);
+  height: var(--ctl-h);
+  border: none;
+  background: none;
+  font-size: var(--fs-title);
+  line-height: 1;
+  color: var(--tx);
+}
+.zoom button + button { border-top: 1px solid var(--line); }
+
+/* 선택한 동 + 숨긴 동 목록 */
+.panel {
+  position: absolute;
+  z-index: 4; /* above the building canvas */
+  top: clamp(8px, 2vw, 16px);
+  left: clamp(8px, 2vw, 16px);
+  right: clamp(52px, 13vw, 78px); /* 범례 자리는 비워둔다 */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: clamp(4px, 1.2vw, 8px);
+  pointer-events: none;
+}
+.panel > * { pointer-events: auto; }
+
+.off {
+  display: flex;
+  flex-wrap: wrap;
+  gap: clamp(3px, 1vw, 6px);
+  font-size: var(--fs-small);
+}
+.off button {
+  padding: 0.35em 0.6em;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--tx2);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+.off button b { color: var(--tx); font-weight: 400; }
+
+.link {
+  background: none;
+  border: none;
+  padding: 0 0.2em;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.badge {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  padding: 0.4em 0.5em 0.4em 0.7em;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--sel);
+  border-radius: calc(var(--radius) * 0.8);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
+  font-size: var(--fs-small);
+}
+.badge b { color: var(--sel); font-size: var(--fs-body); }
+.badge span { color: var(--tx2); }
+.badge button {
+  background: none; border: none; padding: 0 0.15em;
+  color: var(--tx2); font-size: var(--fs-body); line-height: 1;
+}
+.badge .link { font-size: var(--fs-small); }
+
+/* ------------------------------------------------------------------ picker */
+.pick {
+  flex: 0 0 auto;
+  display: flex;
+  gap: clamp(6px, 1.6vw, 12px);
+}
+.pick select {
+  flex: 1 1 0;
+  min-width: 0;
+  height: var(--ctl-h);
+  padding: 0 0.7em;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) * 0.9);
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--tx2) 50%),
+    linear-gradient(135deg, var(--tx2) 50%, transparent 50%);
+  background-position: right 1.1em center, right 0.75em center;
+  background-size: 0.35em 0.35em, 0.35em 0.35em;
+  background-repeat: no-repeat;
+}
+.pick select:disabled { color: var(--tx2); background-color: #fafbfc; }
+.pick select:first-child { flex: 1.6 1 0; }
+
+/* -------------------------------------------------------------------- time */
+.time { flex: 0 0 auto; }
+.big {
+  text-align: center;
+  color: var(--accent);
+  font-size: var(--fs-body);
+  font-weight: 700;
+  margin-bottom: 0.6em;
+}
+.big em {
+  font-style: normal; font-weight: 500;
+  color: var(--tx2); font-size: var(--fs-small); margin-left: 0.5em;
+}
+
+.time input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: var(--ctl-h);
+  background: transparent;
+  display: block;
+  margin: 0;
+}
+.time input[type=range]::-webkit-slider-runnable-track {
+  height: clamp(5px, 1.4vw, 8px);
+  border-radius: 999px;
+  background: linear-gradient(to right,
+    var(--accent) 0, var(--accent) var(--pct),
+    var(--track) var(--pct), var(--track) 100%);
+}
+.time input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: clamp(20px, 5.6vw, 28px);
+  height: clamp(20px, 5.6vw, 28px);
+  margin-top: calc((clamp(5px, 1.4vw, 8px) - clamp(20px, 5.6vw, 28px)) / 2);
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid #dcdfe3;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+}
+.time input[type=range]::-moz-range-track {
+  height: clamp(5px, 1.4vw, 8px); border-radius: 999px; background: var(--track);
+}
+.time input[type=range]::-moz-range-progress {
+  height: clamp(5px, 1.4vw, 8px); border-radius: 999px; background: var(--accent);
+}
+.time input[type=range]::-moz-range-thumb {
+  width: clamp(20px, 5.6vw, 28px); height: clamp(20px, 5.6vw, 28px);
+  border-radius: 50%; background: #fff; border: 1px solid #dcdfe3;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+}
+
+.ticks {
+  display: flex;
+  justify-content: space-between;
+  color: var(--tx2);
+  font-size: var(--fs-small);
+}
+
+/* ----------------------------------------------------------------- seasons */
+.seasons {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: clamp(3px, 0.8vw, 6px);
+  padding: clamp(3px, 0.8vw, 6px);
+  background: #f4f5f7;
+  border-radius: calc(var(--radius) * 1.2);
+}
+.seasons button {
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  height: var(--ctl-h);
+  font-size: var(--fs-body);
+  color: #6b7076;
+}
+.seasons button.on {
+  background: #fff;
+  color: var(--tx);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+}

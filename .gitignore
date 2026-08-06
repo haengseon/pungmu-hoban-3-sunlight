@@ -1,0 +1,18 @@
+# API 키. .env.example 을 복사해서 채운다.
+.env
+.env.local
+
+# 의존성 / 빌드 산출물
+node_modules/
+web/dist/
+__pycache__/
+*.pyc
+
+# 카카오맵 트레이싱 캡처. tools/trace_kakao.mjs 로 언제든 다시 만든다.
+tools/out/
+
+# refine_footprints.py 가 남기는 직전 백업
+web/src/data/*.pre-kakao
+
+# 로컬 전용 설정
+.claude/settings.local.json
