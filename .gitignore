@@ -11,6 +11,11 @@ __pycache__/
 # 카카오맵 트레이싱 캡처. tools/trace_kakao.mjs 로 언제든 다시 만든다.
 tools/out/
 
+# 지면 텍스처. 카카오맵 렌더를 그대로 담은 이미지라 저장소에 올리지 않는다.
+# tools/trace_kakao.mjs -> tools/make_ground.py 로 다시 만든다. 없으면 앱은
+# 브이월드 기본지도만 깔고 그대로 돈다.
+web/public/ground*.webp
+
 # refine_footprints.py 가 남기는 직전 백업
 web/src/data/*.pre-kakao
 

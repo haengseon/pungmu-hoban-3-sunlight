@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>카카오 건축물 트레이싱</title>
+    <!--
+      앱은 카카오맵을 쓰지 않는다. 하지만 web/src/data/buildings.json 의 푸트프린트는
+      카카오가 그리는 건축물 폴리곤을 트레이싱한 값이라, 그 데이터를 다시 뽑을 때만
+      이 페이지를 띄운다. tools/trace_kakao.mjs 가 여기로 들어온다.
+      키 치환(%VITE_KAKAO_JS_KEY%)은 vite 개발 서버가 해준다.
+    -->
+    <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=%VITE_KAKAO_JS_KEY%&autoload=false"></script>
+    <style>
+      html, body { margin: 0; height: 100%; }
+      #map { position: absolute; inset: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script>
+      const EARTH_C = 20037508.342789244
+      const D2R = Math.PI / 180
+      const mercX = (lon) => (lon * EARTH_C) / 180
+      const mercY = (lat) => (Math.log(Math.tan((90 + lat) * D2R * 0.5)) * EARTH_C) / Math.PI
+
+      kakao.maps.load(() => {
+        const map = new kakao.maps.Map(document.getElementById('map'), {
+          center: new kakao.maps.LatLng(37.61565, 126.73345),
+          level: 1,
+        })
+        window.__map = map
+
+        // mercator -> container px, from two projected reference points. Same
+        // derivation the old renderer used, minus the renderer.
+        window.__transform = (lat0, lon0) => {
+          const a = new kakao.maps.LatLng(lat0, lon0)
+          const b = new kakao.maps.LatLng(lat0 + 0.01, lon0 + 0.01)
+          const proj = map.getProjection()
+          const pa = proj.containerPointFromCoords(a)
+          const pb = proj.containerPointFromCoords(b)
+          const mA = { x: mercX(lon0), y: mercY(lat0) }
+          const mB = { x: mercX(lon0 + 0.01), y: mercY(lat0 + 0.01) }
+          return {
+            ox: pa.x, oy: pa.y,
+            sx: (pb.x - pa.x) / (mB.x - mA.x),
+            sy: (pb.y - pa.y) / (mB.y - mA.y),
+            pxPerMetre: Math.hypot(pb.x - pa.x, pb.y - pa.y)
+              / new kakao.maps.Polyline({ path: [a, b] }).getLength(),
+            mA,
+          }
+        }
+      })
+    </script>
+  </body>
+</html>

@@ -48,7 +48,11 @@ DATA = os.path.join(ROOT, "web", "src", "data", "buildings.json")
 TRACE_PNG = os.path.join(ROOT, "tools", "out", "kakao_trace.png")
 TRACE_JSON = os.path.join(ROOT, "tools", "out", "kakao_trace.json")
 
-AMENITY_FLOORS = 2
+# ⚠ 이 파일의 NOT_BUILDING·DONG_ANCHOR 좌표는 **특정 캡처의 픽셀 좌표**다.
+# tools/out/kakao_trace.png 를 다시 찍으면 프레이밍이 몇 px 어긋나고(예: oy 2137 -> 2173,
+# 9 m) 그 좌표들이 전부 빗나가 동이 통째로 사라진다. 재캡처했다면 여기 좌표부터
+# 다시 잡아야 한다. 확인 방법은 `npm run check` - 동 수와 3차 주택형 배열이 먼저 깨진다.
+AMENITY_FLOORS = 1  # build_data.py 와 같은 값. 근생·상가·어린이집은 1층으로 세운다
 
 # Kakao's 필지(대지) fills. The lighter tones are the internal walkways drawn on
 # top of the lot; both are flood-filled into one region, so listing them just

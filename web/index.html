@@ -2,10 +2,14 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>아파트 일조량 · 호반써밋 풍무 Ⅲ</title>
-    <!-- 키는 저장소 루트 .env 의 VITE_KAKAO_JS_KEY 에서 온다 (.env.example 참고) -->
-    <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=%VITE_KAKAO_JS_KEY%&autoload=false"></script>
+    <!-- 핀치는 지도를 확대하는 제스처지 페이지를 확대하는 제스처가 아니다.
+         user-scalable=no 는 안드로이드용이고, iOS 는 이걸 무시하므로
+         src/lib/gestures.js 가 gesturestart 까지 막는다. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <title>풍무역세권 일조 시뮬레이터 · 호반써밋 풍무 Ⅲ</title>
   </head>
   <body>
     <div id="root"></div>

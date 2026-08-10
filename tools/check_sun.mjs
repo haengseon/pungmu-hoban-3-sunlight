@@ -57,13 +57,17 @@ if (e.x <= 0.99 || Math.abs(e.z) > 1e-9) fail('정동 태양 벡터가 동쪽(+x
 
 // --- shadow length grows as the sun drops ----------------------------------
 const d = { y: 2026, m: 12, d: 21 }
+// 데이터에서 가장 높은 볼륨으로 잰다 - 층고·옥탑 상수가 바뀌어도 따라간다
+const tallest = Math.max(...doc.complexes.flatMap((c) => c.buildings.map((b) => b.height)))
+const tallestFloors = doc.complexes.flatMap((c) => c.buildings)
+  .find((b) => b.height === tallest).floors
 const len = (m) => {
   const a = solarPosition(d, m, lat, lon).altitude
-  return a > 0 ? 87.6 / Math.tan((a * Math.PI) / 180) : Infinity
+  return a > 0 ? tallest / Math.tan((a * Math.PI) / 180) : Infinity
 }
 const l10 = len(600)
 const l12 = len(750)
-console.log(`\n29층(87.6m) 그림자: 10시 ${l10.toFixed(0)}m, 정오 ${l12.toFixed(0)}m`)
+console.log(`\n${tallestFloors}층(${tallest}m) 그림자: 10시 ${l10.toFixed(0)}m, 정오 ${l12.toFixed(0)}m`)
 if (!(l10 > l12)) fail('낮은 태양에서 그림자가 더 짧게 계산됨')
 
 // --- dataset shape ---------------------------------------------------------
@@ -74,7 +78,8 @@ for (const c of doc.complexes) {
     vols++
     if (b.dong) dongs.add(`${c.id}:${b.dong}`)
     if (!(b.height > 0) || b.poly.length < 3) fail(`${c.id} ${b.dong}: 잘못된 볼륨`)
-    if (b.kind === 'amenity' && b.floors !== 2) fail(`${c.id}: 상가 층수 ${b.floors}`)
+    // 근린생활시설·상가·어린이집은 1층으로 세운다 (build_data.py 의 AMENITY_FLOORS)
+    if (b.kind === 'amenity' && b.floors !== 1) fail(`${c.id}: 상가 층수 ${b.floors}`)
   }
 }
 console.log(`데이터: ${doc.complexes.length}개 단지, ${dongs.size}개 동, ${vols}개 볼륨`)

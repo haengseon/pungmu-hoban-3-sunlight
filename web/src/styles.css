@@ -15,7 +15,8 @@
   --fs-title: clamp(16px, 4.4vw, 24px);
   --fs-body: clamp(13px, 3.5vw, 17px);
   --fs-small: clamp(11px, 3vw, 14px);
-  --ctl-h: clamp(38px, 10.5vw, 52px);
+  /* 44px 은 접근성 최소 터치 크기다. 좁은 폰에서 그 밑으로 내려가지 않게 바닥을 준다. */
+  --ctl-h: clamp(44px, 10.5vw, 52px);
   --radius: clamp(6px, 1.6vw, 12px);
 }
 
@@ -30,6 +31,11 @@ body {
     "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -webkit-text-size-adjust: 100%;
+  /* 화면 전체가 한 장이라 스크롤할 것이 없다. 당겨서 새로고침도, 고무줄 반동도
+     조작을 방해하기만 한다. */
+  overscroll-behavior: none;
+  /* 탭할 때마다 깜빡이는 회색 사각형은 지도 위에서 특히 거슬린다 */
+  -webkit-tap-highlight-color: transparent;
 }
 
 button, input, select { font: inherit; color: inherit; }
@@ -37,11 +43,18 @@ button { cursor: pointer; }
 
 .wrap {
   width: 100%;
+  /* svh = 주소창이 보이는 상태의 높이. dvh 로 두면 주소창이 접히고 펴질 때마다 높이가
+     변하고, 그 차이를 flex: 1 1 auto 인 지도가 전부 먹어서 위쪽이 깜빡인다 -
+     슬라이더를 화면 아래에서 끌다 크롬이 반응하는 게 딱 그 경우다. svh 는 가장 작은
+     상태로 고정이라 아무것도 가려지지 않으면서 흔들림도 없다. */
   height: 100%;
-  min-height: 100dvh;
+  height: 100svh;
   display: flex;
   flex-direction: column;
-  padding: var(--pad);
+  /* viewport-fit=cover 라 노치와 홈 인디케이터 아래까지 화면이 뻗는다.
+     계절 버튼이 인디케이터에 깔리지 않게 안전영역만큼 더 준다. */
+  padding: max(var(--pad), env(safe-area-inset-top)) max(var(--pad), env(safe-area-inset-right))
+    max(var(--pad), env(safe-area-inset-bottom)) max(var(--pad), env(safe-area-inset-left));
   gap: var(--gap);
 }
 
@@ -58,6 +71,217 @@ header h1 {
   font-weight: 700;
   letter-spacing: -0.02em;
 }
+/* 안내를 닫은 뒤 다시 부르는 유일한 통로라, 눈에 띄되 제목을 가리지는 않는다 */
+.ask {
+  width: 1.6em; height: 1.6em;
+  margin-left: 0.1em;
+  display: grid; place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--tx2);
+  font-size: var(--fs-small);
+  line-height: 1;
+}
+
+/* ------------------------------------------------------------------- help */
+.help {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: end center; /* 폰에서는 엄지가 닿는 아래쪽 */
+  padding: var(--pad);
+  padding-bottom: max(var(--pad), env(safe-area-inset-bottom));
+  background: rgba(20, 24, 30, 0.42);
+  animation: help-in 0.18s ease-out;
+}
+@media (min-height: 700px) { .help { place-items: center; } }
+
+.help-card {
+  width: 100%;
+  max-width: 360px;
+  padding: clamp(18px, 5vw, 26px);
+  background: #fff;
+  border-radius: calc(var(--radius) * 1.6);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.26);
+  animation: help-rise 0.22s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.help-card h2 {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.help-sub {
+  margin: 0.4em 0 0;
+  color: var(--tx2);
+  font-size: var(--fs-small);
+}
+
+.help-card ul {
+  margin: clamp(14px, 4vw, 20px) 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: clamp(10px, 2.6vw, 14px);
+}
+.help-card li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 0.8em;
+}
+.help-card svg {
+  grid-row: span 2;
+  width: clamp(30px, 8vw, 36px);
+  height: clamp(30px, 8vw, 36px);
+  color: var(--accent);
+}
+.help-card li b { font-weight: 600; font-size: var(--fs-body); }
+.help-card li span { color: var(--tx2); font-size: var(--fs-small); }
+
+.help-warn {
+  margin: 0 0 clamp(12px, 3vw, 16px);
+  padding: 0.6em 0.75em;
+  border-left: 3px solid #d92020;
+  border-radius: calc(var(--radius) * 0.5);
+  background: #fdecec;
+  color: #a81b1b;
+  font-size: var(--fs-small);
+  line-height: 1.5;
+}
+.help-warn b { font-weight: 700; }
+
+.help-go {
+  width: 100%;
+  height: var(--ctl-h);
+  border: none;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #fff;
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+/* 카드가 열릴 때 포커스를 받는다 - 스크린리더에는 알리되 테두리는 그리지 않는다 */
+.help-card:focus { outline: none; }
+
+@keyframes help-in { from { opacity: 0; } }
+@keyframes help-rise { from { transform: translateY(14px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .help, .help-card { animation: none; }
+}
+/* ------------------------------------------------- 토지이용계획 겹쳐보기 */
+/* 켜고 끄는 것이라는 게 눌러보기 전에 읽혀야 한다. 색만 바뀌는 버튼은 '지금 켜진
+   상태'인지 '누르면 켜진다'인지 구분이 안 가서, 실제 스위치 모양을 붙인다. */
+.plan-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55em;
+  padding: 0.42em 0.5em 0.42em 0.9em;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.14);
+  color: var(--tx);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+/* 트랙 + 손잡이 */
+.plan-toggle i {
+  position: relative;
+  width: 2.1em;
+  height: 1.15em;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #c8cdd4;
+  transition: background 0.15s;
+}
+.plan-toggle i span {
+  position: absolute;
+  top: 0.13em; left: 0.15em;
+  width: 0.9em; height: 0.9em;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s;
+}
+.plan-toggle.on {
+  border-color: rgba(31, 111, 235, 0.5);
+  box-shadow: 0 1px 8px rgba(31, 111, 235, 0.28);
+}
+.plan-toggle.on i { background: #1f6feb; }
+.plan-toggle.on i span { transform: translateX(0.92em); }
+@media (prefers-reduced-motion: reduce) {
+  .plan-toggle i, .plan-toggle i span { transition: none; }
+}
+
+/* 용지 이름표. 지도 위 어떤 바닥색에서도 읽히게 흰 알약 + 왼쪽에 용도 색 점. */
+.lot-tag {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.22em 0.6em 0.22em 0.45em;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(70, 78, 90, 0.2);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.12);
+  /* 글자까지 옅게. 이름표는 어디까지나 배경 정보라 3D 를 가리면 안 된다 */
+  color: rgba(42, 47, 54, 0.8);
+  font-size: clamp(10px, 2.6vw, 12px);
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  backdrop-filter: blur(2px);
+}
+.lot-tag::before {
+  content: '';
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--tag);
+}
+
+/* 블록 코드. 도면에서 그 단지 땅을 부르는 이름이라 용지 이름표와는 결이 달라
+   짙은 알약으로 따로 세운다. */
+.block-tag {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4em;
+  padding: 0.24em 0.65em;
+  border-radius: 999px;
+  background: rgba(32, 38, 46, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.18);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: clamp(10px, 2.6vw, 12px);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.block-tag.office {
+  background: rgba(30, 104, 92, 0.72);
+  border-color: rgba(190, 240, 230, 0.3);
+}
+.block-tag b { font-weight: 800; letter-spacing: 0.02em; }
+.block-tag span { color: rgba(255, 255, 255, 0.78); font-weight: 500; }
+
+/* ------------------------------------------------------------------ 경고문 */
+/* 지도가 아무리 그럴듯해도 파생 데이터로 만든 추정이다. 그 사실이 화면에서 사라지면
+   안 되므로 항상 보이는 자리에 두고, 붉은색으로 다른 안내와 구분한다. */
+.warn {
+  flex: 0 0 auto;
+  margin: calc(var(--gap) * -0.55) 0 0;
+  padding: 0.5em 0.7em;
+  border-left: 3px solid #d92020;
+  border-radius: calc(var(--radius) * 0.5);
+  background: #fdecec;
+  color: #a81b1b;
+  font-size: var(--fs-small);
+}
+.warn b { font-weight: 700; }
+
 /* --------------------------------------------------------------------- map */
 .mapbox {
   position: relative;
@@ -67,59 +291,60 @@ header h1 {
   overflow: hidden;
   background: #eef0f2;
 }
-.map { position: absolute; inset: 0; }
+.map {
+  position: absolute;
+  inset: 0;
+  /* 지도를 끄는 동안 글자가 선택되거나 길게 눌러 iOS 공유 메뉴가 뜨면 안 된다 */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+/* 밤 효과. 지도 타일과 3D 를 한꺼번에 덮어야 같이 어두워진다 - 3D 만 어둡게 하면
+   바닥만 대낮으로 남는다. 조작은 그대로 통과시킨다. */
+.dusk {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: linear-gradient(to bottom,
+    rgba(6, 9, 22, 0.55), rgba(14, 19, 40, 0.46));
+  transition: opacity 0.2s linear;
+}
+@media (prefers-reduced-motion: reduce) { .dusk { transition: none; } }
+
 .err {
   position: absolute; inset: 0; margin: 0;
   display: grid; place-items: center; text-align: center;
   padding: var(--pad); color: #b4232a; font-size: var(--fs-small);
 }
 
-/* 3차 옥상에 칠한 주택형 색의 범례 - 동·호 배치도와 같은 색 */
-.types {
-  position: absolute;
-  z-index: 4; /* above the building canvas */
-  top: clamp(8px, 2vw, 16px);
-  right: clamp(8px, 2vw, 16px);
-  margin: 0;
-  padding: clamp(4px, 1.2vw, 8px) clamp(6px, 1.6vw, 10px);
-  list-style: none;
-  display: grid;
-  gap: clamp(2px, 0.6vw, 4px);
-  background: rgba(255, 255, 255, 0.9);
-  border-radius: calc(var(--radius) * 0.8);
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.14);
-  font-size: var(--fs-small);
+/* 드롭다운에 3차 동만 있는 까닭 */
+.pick-note {
+  flex: 0 0 auto;
+  margin: calc(var(--gap) * -0.6) 0 0;
   color: var(--tx2);
+  font-size: var(--fs-small);
 }
-.types li { display: flex; align-items: center; gap: 0.45em; }
-.types i {
-  width: 1.5em; height: 0.8em;
-  border: 1px solid rgba(70, 78, 90, 0.45);
-  border-radius: 2px;
+.pick-note b { color: var(--tx); font-weight: 600; }
+/* 확대·축소 + 나침반. 나침반을 끌면 회전하고 위아래로 끌면 기울어진다 - 이 화면에서
+   3D 를 돌려보는 유일한 손잡이라 터치 크기(--ctl-h)까지 키운다. */
+.maplibregl-ctrl-group { border-radius: calc(var(--radius) * 0.8) !important; }
+.maplibregl-ctrl-group button {
+  width: var(--ctl-h) !important;
+  height: var(--ctl-h) !important;
 }
+.maplibregl-ctrl-bottom-right { margin: 0 clamp(8px, 2vw, 16px) clamp(8px, 2vw, 16px) 0; }
 
-.zoom {
-  position: absolute;
-  z-index: 4; /* above the building canvas */
-  right: clamp(8px, 2vw, 16px);
-  bottom: clamp(8px, 2vw, 16px);
-  display: flex;
-  flex-direction: column;
-  border-radius: calc(var(--radius) * 0.8);
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
+/* 출처 표시는 브이월드 약관상 필수다. 지울 수는 없으니 각주 크기로 낮춘다. */
+.maplibregl-ctrl-attrib {
+  background: none !important;
+  padding: 0 0.4em !important;
+  font-size: clamp(8px, 2vw, 10px);
+  line-height: 1.6;
+  color: var(--tx2);
+  opacity: 0.55;
 }
-.zoom button {
-  width: var(--ctl-h);
-  height: var(--ctl-h);
-  border: none;
-  background: none;
-  font-size: var(--fs-title);
-  line-height: 1;
-  color: var(--tx);
-}
-.zoom button + button { border-top: 1px solid var(--line); }
+.maplibregl-ctrl-attrib a { color: inherit; text-decoration: none; }
 
 /* 선택한 동 + 숨긴 동 목록 */
 .panel {
@@ -143,7 +368,9 @@ header h1 {
   font-size: var(--fs-small);
 }
 .off button {
-  padding: 0.35em 0.6em;
+  /* 손가락으로 누를 칩이다. em 패딩만으로는 폰에서 26px 남짓까지 얇아진다. */
+  min-height: 34px;
+  padding: 0.35em 0.75em;
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -163,9 +390,9 @@ header h1 {
 
 .badge {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.5em;
-  padding: 0.4em 0.5em 0.4em 0.7em;
+  padding: 0.2em 0.4em 0.2em 0.7em;
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid var(--sel);
   border-radius: calc(var(--radius) * 0.8);
@@ -174,11 +401,14 @@ header h1 {
 }
 .badge b { color: var(--sel); font-size: var(--fs-body); }
 .badge span { color: var(--tx2); }
+/* 배지 안의 숨기기 / × 도 손가락으로 누른다 */
 .badge button {
-  background: none; border: none; padding: 0 0.15em;
+  background: none; border: none; padding: 0 0.3em;
+  min-width: 34px; min-height: 34px;
+  display: inline-flex; align-items: center; justify-content: center;
   color: var(--tx2); font-size: var(--fs-body); line-height: 1;
 }
-.badge .link { font-size: var(--fs-small); }
+.badge .link { font-size: var(--fs-small); min-width: 0; }
 
 /* ------------------------------------------------------------------ picker */
 .pick {
@@ -190,6 +420,8 @@ header h1 {
   flex: 1 1 0;
   min-width: 0;
   height: var(--ctl-h);
+  /* iOS 는 16px 미만 폼 컨트롤을 누르면 페이지를 확대한다 */
+  font-size: max(16px, var(--fs-body));
   padding: 0 0.7em;
   background: #fff;
   border: 1px solid var(--line);
@@ -259,6 +491,15 @@ header h1 {
 .ticks {
   display: flex;
   justify-content: space-between;
+  color: var(--tx2);
+  font-size: var(--fs-small);
+}
+
+/* ------------------------------------------------------------------ 만든이 */
+.credit {
+  flex: 0 0 auto;
+  margin: calc(var(--gap) * -0.6) 0 0;
+  text-align: right;
   color: var(--tx2);
   font-size: var(--fs-small);
 }
