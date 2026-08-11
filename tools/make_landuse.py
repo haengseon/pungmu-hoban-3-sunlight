@@ -108,6 +108,15 @@ RENAME = [
     (126.72605, 37.61786, 90, "종교시설", "사우동성당"),
 ]
 
+# 도면이 그린 자리와 실제로 들어선 자리가 다른 것. 도면의 획지 모양은 그대로 두고
+# 자리만 옮긴다 - 바뀐 필지의 실제 경계는 공개 도면에 없다.
+#   (용지, 옮길 lon, lat)
+RELOCATE = [
+    # 종교용지는 사우동 496-1 로 바뀌어 그 자리에 성당이 섰다 (브이월드 주소검색으로
+    # 좌표를 얻었다). 도면에는 아직 옛 자리에 종교시설로 남아 있다.
+    ("사우동성당", 126.729538, 37.614786),
+]
+
 # 도면에는 색면이 있지만 지금 계획에는 없는 것.
 DROP = [
     # 동쪽 끝 소공원 아래 학교용지는 폐기됐다
@@ -401,6 +410,19 @@ def main() -> None:
                 f["properties"]["use"] = now
                 hit += 1
         print(f"  이름 고침 {was} -> {now}: {hit}개")
+
+    for use, lon, lat in RELOCATE:
+        for f in feats:
+            if f["properties"].get("use") != use:
+                continue
+            at = f["properties"]["at"]
+            dx, dy = lon - at[0], lat - at[1]
+            ring = f["geometry"]["coordinates"][0]
+            f["geometry"]["coordinates"][0] = [[round(x + dx, 7), round(y + dy, 7)]
+                                               for x, y in ring]
+            f["properties"]["at"] = [round(lon, 7), round(lat, 7)]
+            print(f"  자리 옮김 {use} -> {lon}, {lat}")
+
 
     for code, label, lon, lat in BLOCKS:
         feats.append({
