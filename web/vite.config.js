@@ -18,9 +18,11 @@ export default defineConfig({
     // 127.0.0.1 에만 바인딩되므로 LAN 에 그대로 노출되지는 않는다.
     allowedHosts: ['.trycloudflare.com'],
   },
+  // maplibre 워커는 ES 모듈이라(형제 파일을 import 한다) 기본값 iife 로 묶으면 깨진다
+  worker: { format: 'es' },
   build: { chunkSizeWarningLimit: 2000 }, // maplibre-gl + three
-  // maplibre 는 워커를 별도 파일로 띄우는데, vite 의 의존성 사전번들이 그 파일을
-  // 내놓지 않아 개발 서버에서 404 가 난다. 래스터는 메인 스레드라 멀쩡하고
-  // geojson 소스만 조용히 로드가 멈춘다 (에러도 안 난다). 사전번들에서 뺀다.
+  // maplibre 워커를 사전번들이 건드리지 않게 둔다. 워커 주소 자체는 src/main.jsx 가
+  // setWorkerUrl 로 직접 지정한다 - 그게 없으면 워커가 404 로 떨어지고, 래스터는
+  // 멀쩡한 채 geojson 소스만 조용히 멈춘다 (에러도 안 난다).
   optimizeDeps: { exclude: ['maplibre-gl'] },
 })
