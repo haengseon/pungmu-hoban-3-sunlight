@@ -146,6 +146,7 @@ iOS 는 그보다 작은 컨트롤을 누르면 페이지를 확대해 버린다
 | `fix_footprints.py` | 파이프라인 뒤 손보는 개별 교정 |
 | `check_sun.mjs` | 태양위치·그림자 길이·데이터 정합성 + 3차 주택형 셀 검증 |
 | `check_shadow.mjs` | 벽면·옥상 그림자 경계를 씬 레이캐스트로 이론값과 대조 |
+| `check_resize.mjs` | 지도 크기가 바뀐 뒤에도 3D 가 같은 자리에 그려지는지 픽셀로 대조 |
 | `smoke.mjs` | 실제 브라우저로 열어 볼륨 수·UI·렌더 시간 보고 + 스크린샷 |
 
 ```bash
@@ -160,7 +161,8 @@ NAME=kakao_wide  SCALE=0.5 OUT=ground_wide python tools/make_ground.py
 python tools/add_context.py
 python tools/make_landuse.py
 python tools/make_offices.py      # landuse.json 을 읽으므로 순서를 지킨다
-node tools/check_sun.mjs && node tools/check_shadow.mjs && node tools/smoke.mjs
+node tools/check_sun.mjs && node tools/check_shadow.mjs
+node tools/check_resize.mjs && node tools/smoke.mjs
 ```
 
 앱은 카카오맵을 쓰지 않지만 푸트프린트의 출처는 여전히 카카오다. 그래서 트레이싱만
@@ -324,6 +326,13 @@ level 1·2 어느 쪽에서도 30% 남짓만 닫힌 도형으로 잡힌다.
   408동이 한 덩어리로 붙어 보인다. `EdgesGeometry` 를 9° 임계로 뽑아 트레이싱
   외곽선의 1° 계단이 세로선 다발이 되지 않게 하고, 면은 `polygonOffset` 으로 살짝
   물려 선이 면과 다투다 점선처럼 끊기지 않게 한다.
+- **three 에게 드로잉 버퍼 크기를 매 프레임 다시 알려 준다.** three 는 렌더러를 만든
+  시점의 캔버스 크기를 붙들고 있는데, 그림자 맵을 다시 굽는 프레임은 렌더타깃을
+  되돌리면서 그 크기로 뷰포트를 복원해 버린다. 지도 높이가 한 번이라도 바뀌면
+  (공지 닫기, 메뉴 접기, 창 크기, 기기 회전) 그 프레임만 3D 가 어긋난 크기로 그려지고,
+  시각 슬라이더는 매 스텝 다시 구우므로 끄는 내내 화면이 깜빡인다. `setSize` 는 쓰면
+  안 된다 - 캔버스 크기와 style 을 직접 건드려 MapLibre 의 리사이즈와 서로 밀어낸다.
+  `check_resize.mjs` 가 이걸 픽셀로 잡는다
 - **숨긴 동은 아무것도 그리지 않지만 그림자는 계속 던진다.** `visible = false` 는
   그림자 패스에서도 빠지므로, 대신 `colorWrite`·`depthWrite` 를 끈 재질로 바꾼다.
 - 건물 선택은 `Raycaster` 다 — 기울인 상태에서도 화면에 보이는 그대로 집힌다.

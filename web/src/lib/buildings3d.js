@@ -184,13 +184,15 @@ export class Buildings3D {
       type: 'custom',
       renderingMode: '3d',
       onAdd: (m, gl) => this.onAdd(m, gl),
-      render: (gl, args) => this.render(args),
+      render: (gl, args) => this.render(gl, args),
     }
     map.addLayer(this.layer)
   }
 
   onAdd(map, gl) {
     this.renderer = new THREE.WebGLRenderer({ canvas: map.getCanvas(), context: gl })
+    this.vw = 0 // three 에 마지막으로 알려 준 드로잉 버퍼 크기 (render 참고)
+    this.vh = 0
     this.renderer.autoClear = false
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
@@ -200,7 +202,21 @@ export class Buildings3D {
     this.renderer.shadowMap.needsUpdate = true
   }
 
-  render({ modelViewProjectionMatrix }) {
+  render(gl, { modelViewProjectionMatrix }) {
+    // three 는 생성 시점의 캔버스 크기를 붙들고 있고, 그림자 맵을 다시 굽는 프레임마다
+    // 렌더타깃을 되돌리면서 그 크기로 뷰포트를 복원한다. 지도 영역 높이가 한 번이라도
+    // 바뀌면(공지 닫기, 창 크기, 기기 회전) 그 프레임만 3D 가 어긋난 크기로 그려져
+    // 화면이 깜빡인다 - 시각 슬라이더는 매 스텝 그림자를 다시 구우므로 끄는 내내 그렇다.
+    // setSize 는 쓰면 안 된다. 캔버스 크기와 style 을 직접 건드려 MapLibre 의 리사이즈와
+    // 서로 밀어낸다. setViewport 는 three 내부 값만 바꾼다.
+    const w = gl.drawingBufferWidth
+    const h = gl.drawingBufferHeight
+    if (w !== this.vw || h !== this.vh) {
+      this.vw = w
+      this.vh = h
+      this.renderer.setViewport(0, 0, w, h)
+    }
+
     // maplibre's MVP takes world pixels - mercator scaled by the world size at
     // the current zoom - so the metre -> mercator model matrix picks up that
     // factor here. Folding it in this way also keeps the combined matrix

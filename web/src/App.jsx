@@ -185,6 +185,7 @@ export default function App() {
   const mapRef = useRef(null)
   const markersRef = useRef([])
   const planRef = useRef(true)
+  const tagsRef = useRef(true)
   const [season, setSeason] = useState('summer')
   const [minutes, setMinutes] = useState(12 * 60)
   const [sel, setSel] = useState(null) // {complexId, dong, floor}
@@ -193,6 +194,12 @@ export default function App() {
   const [err, setErr] = useState(null)
   const [help, setHelp] = useState(() => !helpSeen())
   const [plan, setPlan] = useState(true) // 토지이용계획 겹쳐보기
+  // 지도 크게보기. 아래 메뉴를 접어 세로를 지도에 넘긴다 - 다만 시각 슬라이더는
+  // 남긴다. 그림자를 움직여 보는 게 이 화면의 본체라 접으면 볼 게 없어진다.
+  const [wide, setWide] = useState(false)
+  // 이름표는 계획을 읽을 때만 필요하다. 3D 를 들여다볼 때는 가리기만 하므로 따로 끈다.
+  const [tags, setTags] = useState(true)
+  const [noteOff, setNoteOff] = useState(false)
 
   const date = useMemo(() => {
     const s = SEASONS.find((x) => x.id === season)
@@ -337,7 +344,9 @@ export default function App() {
               .setLngLat(f.geometry.coordinates)
           })
         markersRef.current = [...lots, ...blocks]
-        if (planRef.current) for (const mk of markersRef.current) mk.addTo(map)
+        if (planRef.current && tagsRef.current) {
+          for (const mk of markersRef.current) mk.addTo(map)
+        }
       })
       .catch(() => { /* 계획도가 없으면 라벨만 없다 */ })
 
@@ -360,16 +369,17 @@ export default function App() {
   // 이 지역에서는 그림자만큼이나 궁금한 정보다. 켜둔 채로 연다.
   useEffect(() => {
     planRef.current = plan
+    tagsRef.current = tags
     const map = mapRef.current
     if (!ready || !map) return
     for (const id of ['landuse-fill', 'landuse-line', 'district-line']) {
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', plan ? 'visible' : 'none')
     }
     for (const mk of markersRef.current) {
-      if (plan) mk.addTo(map)
+      if (plan && tags) mk.addTo(map)
       else mk.remove()
     }
-  }, [ready, plan])
+  }, [ready, plan, tags])
 
   useEffect(() => {
     if (ready) layerRef.current?.setSun(sun)
@@ -384,16 +394,21 @@ export default function App() {
   }, [ready, hidden])
 
   return (
-    <div className="wrap">
+    <div className={`wrap${wide ? ' wide' : ''}`}>
       <header>
         <h1>풍무역세권 일조 시뮬레이터</h1>
         <button className="ask" onClick={() => setHelp(true)} aria-label="조작법">?</button>
       </header>
 
-      <p className="warn" role="note">
-        <b>참고용입니다.</b> 모든 3D 건물은 층고와 거리를 추정값으로 계산한 가상의
-        건물이므로 <b>실제 일조량</b>과 다를 수 있습니다.
-      </p>
+      {!noteOff && (
+        <p className="warn" role="note">
+          <span>
+            <b>참고용입니다.</b> 모든 3D 건물은 층고와 거리를 추정값으로 계산한 가상의
+            건물이므로 <b>실제 일조량</b>과 다를 수 있습니다.
+          </span>
+          <button onClick={() => setNoteOff(true)} aria-label="안내 닫기">×</button>
+        </p>
+      )}
 
       {/* 지도가 뜬 뒤에 띄운다 - 3D 가 뒤에 보이는 채로 읽어야 무슨 말인지 안다 */}
       <Help open={help && ready} onClose={() => setHelp(false)} />
@@ -412,6 +427,17 @@ export default function App() {
             토지이용계획
             <i aria-hidden="true"><span /></i>
           </button>
+          {plan && (
+            <button
+              className={`plan-toggle${tags ? ' on' : ''}`}
+              onClick={() => setTags((v) => !v)}
+              role="switch"
+              aria-checked={tags}
+            >
+              이름표
+              <i aria-hidden="true"><span /></i>
+            </button>
+          )}
           {selInfo && (
             <div className="badge">
               <b>{sel.dong}동</b>
@@ -435,41 +461,14 @@ export default function App() {
         </div>
       </div>
 
-      {/* 주변 단지는 그림자를 드리우는 역할만 한다. 드롭다운에 3차 동만 있는 이유를
-          모르면 "왜 저 단지는 안 나오지" 로 읽히므로 미리 말해 준다. */}
-      <p className="pick-note">동·호수 선택은 <b>{SUBJECT.name}</b> 만 가능합니다. 주변 단지는 그림자만 계산합니다.</p>
-
-      <div className="pick">
-        <select
-          value={sel ? `${sel.complexId}|${sel.dong}` : ''}
-          onChange={(e) => {
-            const v = e.target.value
-            if (!v) return setSel(null)
-            const [cid, dong] = v.split('|')
-            select(cid, dong)
-          }}
-        >
-          <option value="">동 선택</option>
-          <optgroup label={SUBJECT.name}>
-            {SUBJECT.dongs.map((d) => (
-              <option key={d.dong} value={`${SUBJECT.id}|${d.dong}`}>
-                {d.dong}동 ({d.floors}층)
-              </option>
-            ))}
-          </optgroup>
-        </select>
-        <select
-          value={sel?.floor ?? ''}
-          disabled={!sel}
-          onChange={(e) => setSel((p) => ({ ...p, floor: Number(e.target.value) }))}
-        >
-          {!sel && <option value="">호수</option>}
-          {sel &&
-            Array.from({ length: maxFloor }, (_, i) => maxFloor - i).map((f) => (
-              <option key={f} value={f}>{f}층</option>
-            ))}
-        </select>
-      </div>
+      <button
+        className="fold"
+        onClick={() => setWide((v) => !v)}
+        aria-expanded={!wide}
+      >
+        <i aria-hidden="true" />
+        {wide ? '메뉴 보기' : '지도 크게보기'}
+      </button>
 
       <div className="time">
         <div className="big">
@@ -492,19 +491,58 @@ export default function App() {
         </div>
       </div>
 
-      <div className="seasons">
-        {SEASONS.map((s) => (
-          <button
-            key={s.id}
-            className={s.id === season ? 'on' : ''}
-            onClick={() => setSeason(s.id)}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
+      {!wide && (
+        <>
+          {/* 주변 단지는 그림자를 드리우는 역할만 한다. 드롭다운에 3차 동만 있는
+              이유를 모르면 "왜 저 단지는 안 나오지" 로 읽히므로 미리 말해 준다. */}
+          <p className="pick-note">동·호수 선택은 <b>{SUBJECT.name}</b> 만 가능합니다. 주변 단지는 그림자만 계산합니다.</p>
 
-      <p className="credit">만든이 : 호반써밋3 어흥</p>
+          <div className="pick">
+            <select
+              value={sel ? `${sel.complexId}|${sel.dong}` : ''}
+              onChange={(e) => {
+                const v = e.target.value
+                if (!v) return setSel(null)
+                const [cid, dong] = v.split('|')
+                select(cid, dong)
+              }}
+            >
+              <option value="">동 선택</option>
+              <optgroup label={SUBJECT.name}>
+                {SUBJECT.dongs.map((d) => (
+                  <option key={d.dong} value={`${SUBJECT.id}|${d.dong}`}>
+                    {d.dong}동 ({d.floors}층)
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+            <select
+              value={sel?.floor ?? ''}
+              disabled={!sel}
+              onChange={(e) => setSel((p) => ({ ...p, floor: Number(e.target.value) }))}
+            >
+              {!sel && <option value="">호수</option>}
+              {sel &&
+                Array.from({ length: maxFloor }, (_, i) => maxFloor - i).map((f) => (
+                  <option key={f} value={f}>{f}층</option>
+                ))}
+            </select>
+          </div>
+      <div className="seasons">
+            {SEASONS.map((s) => (
+              <button
+                key={s.id}
+                className={s.id === season ? 'on' : ''}
+                onClick={() => setSeason(s.id)}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {!wide && <p className="credit">만든이 : 호반써밋3 어흥</p>}
     </div>
   )
 }

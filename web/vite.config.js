@@ -5,8 +5,18 @@ import react from '@vitejs/plugin-react'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
+// JS·CSS 주석은 최소화가 알아서 떨군다. index.html 은 손대지 않으므로 여기만 따로 턴다 -
+// 소스에는 왜 그렇게 했는지가 남아 있어야 하고, 배포본에는 남을 이유가 없다.
+const stripHtmlComments = () => ({
+  name: 'strip-html-comments',
+  apply: 'build',
+  transformIndexHtml: (html) => html
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/^[ \t]*\n/gm, ''),
+})
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), stripHtmlComments()],
   // 키는 저장소 루트의 .env 한 곳에서만 관리한다. tools/ 파이프라인도 같은 파일을
   // 읽으므로 web/ 와 tools/ 가 서로 다른 값을 보는 일이 없다.
   envDir: ROOT,

@@ -272,6 +272,9 @@ header h1 {
    안 되므로 항상 보이는 자리에 두고, 붉은색으로 다른 안내와 구분한다. */
 .warn {
   flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
   margin: calc(var(--gap) * -0.55) 0 0;
   padding: 0.5em 0.7em;
   border-left: 3px solid #d92020;
@@ -281,12 +284,53 @@ header h1 {
   font-size: var(--fs-small);
 }
 .warn b { font-weight: 700; }
+.warn span { flex: 1 1 auto; }
+/* 한 번 읽고 나면 계속 자리를 먹는다. 닫을 수 있게 두되 기억하지는 않는다 -
+   다음에 열었을 때 이게 추정이라는 사실은 다시 보여야 한다. */
+.warn button {
+  flex: 0 0 auto;
+  width: 1.6em; height: 1.6em;
+  margin: -0.15em -0.25em 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  font-size: 1.1em;
+  line-height: 1;
+  opacity: 0.65;
+}
+.warn button:hover { opacity: 1; background: rgba(168, 27, 27, 0.1); }
+
+/* 아래 메뉴 접기. 손잡이 하나가 열림/닫힘을 다 말한다 - 화살표가 방향을 가리킨다. */
+.fold {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45em;
+  margin: calc(var(--gap) * -0.55) 0 calc(var(--gap) * -0.4);
+  padding: 0.35em;
+  border: 0;
+  background: none;
+  color: var(--tx2);
+  font-size: var(--fs-small);
+  font-weight: 600;
+}
+.fold i {
+  width: 0.62em; height: 0.62em;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-0.12em) rotate(-135deg);
+}
+.wrap.wide .fold i { transform: translateY(0.1em) rotate(45deg); }
 
 /* --------------------------------------------------------------------- map */
 .mapbox {
   position: relative;
   flex: 1 1 auto;
-  min-height: 40vh;
+  /* 지도가 이 화면의 본체다. 아래 메뉴를 접으면(.wrap.wide) 남는 세로를 전부 가져간다. */
+  min-height: 46svh;
   border-radius: var(--radius);
   overflow: hidden;
   background: #eef0f2;
