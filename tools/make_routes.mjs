@@ -11,7 +11,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { PNG } from 'pngjs'
+import { carveBuildings, components, loadBuildings, loadWalk } from './lib/walkmask.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const EARTH_C = 20037508.342789244
@@ -34,61 +34,14 @@ const ALT_NEAR_M = 22      // 그 둘레의 폭
 const ALT_MIN_DIFF = 0.12  // 최단보다 이만큼도 안 다르면 같은 길로 본다
 const ALT_MAX_RATIO = 1.9  // 최단의 이 배를 넘으면 대안이라 할 수 없다
 
-const meta = JSON.parse(readFileSync(join(ROOT, 'web/src/data/walk.json'), 'utf8'))
-const png = PNG.sync.read(readFileSync(join(ROOT, 'web/public/walk_mask.png')))
-const W = png.width, H = png.height
-const MPP = meta.metresPerPixel
-const walk = new Uint8Array(W * H)
-for (let i = 0; i < W * H; i++) walk[i] = png.data[i << 2] >= 128 ? 1 : 0
-
-const merc = ([lon, lat]) => [
-  lon * EARTH_C / 180,
-  Math.log(Math.tan((90 + lat) * Math.PI / 360)) * EARTH_C / Math.PI,
-]
-const [tl, tr, , bl] = meta.coordinates.map(merc)
-const toPx = ([lon, lat]) => {
-  const [mx, my] = merc([lon, lat])
-  return [(mx - tl[0]) / (tr[0] - tl[0]) * W, (my - tl[1]) / (bl[1] - tl[1]) * H]
-}
-const toLonLat = (x, y) => {
-  const mx = tl[0] + (x / W) * (tr[0] - tl[0])
-  const my = tl[1] + (y / H) * (bl[1] - tl[1])
-  return [
-    +(mx * 180 / EARTH_C).toFixed(7),
-    +(Math.atan(Math.exp(my * Math.PI / EARTH_C)) * 360 / Math.PI - 90).toFixed(7),
-  ]
-}
-
-// 걸을 수 있는 면을 성분으로 나눠 가장 큰 것을 골라 둔다. 그냥 '가장 가까운 걸을 수
-// 있는 칸' 에 붙이면 라벨 테두리 같은 고립된 조각에 걸려, 목적지가 거기 붙는 순간
-// 모든 동이 도달 불가로 나온다.
-const comp = new Int32Array(W * H).fill(-1)
-let mainComp = -1
-{
-  const sizes = []
-  for (let s0 = 0; s0 < W * H; s0++) {
-    if (!walk[s0] || comp[s0] >= 0) continue
-    const id = sizes.length
-    const q = [s0]
-    comp[s0] = id
-    for (let head = 0; head < q.length; head++) {
-      const i = q[head]
-      const x = i % W, y = (i - x) / W
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const nx = x + dx, ny = y + dy
-          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue
-          const j = ny * W + nx
-          if (walk[j] && comp[j] < 0) { comp[j] = id; q.push(j) }
-        }
-      }
-    }
-    sizes.push(q.length)
-  }
-  mainComp = sizes.indexOf(Math.max(...sizes))
-  console.log(`보행망 ${sizes.length}개 성분, 주 망 `
-    + `${(Math.max(...sizes) * MPP ** 2 / 1e4).toFixed(1)} ha`)
-}
+const { W, H, MPP, walk, toPx, toLonLat } = loadWalk(ROOT)
+const buildings = loadBuildings(ROOT, toPx)
+// 마스크는 사람이 붓으로 고치는 파일이라 동 모서리를 살짝 덮는 일이 생긴다.
+// 건물 자리는 어차피 걸을 수 없으니 읽을 때마다 깎아 낸다.
+const cut = carveBuildings(walk, buildings, W, H, MPP)
+const { comp, sizes, main: mainComp } = components(walk, W, H)
+console.log(`건물 자리 ${(cut * MPP ** 2).toFixed(0)} m2 깎음 · `
+  + `보행망 ${sizes.length}개 성분, 주 망 ${(Math.max(...sizes) * MPP ** 2 / 1e4).toFixed(1)} ha`)
 
 /** 가장 가까운, 주 보행망 위의 칸 */
 function snap(x, y) {
@@ -168,22 +121,15 @@ const D8 = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
 }
 
 // --- 동마다 경로 -------------------------------------------------------------
-const complexes = []
-for (const f of ['buildings', 'context', 'offices']) {
-  const doc = JSON.parse(readFileSync(join(ROOT, `web/src/data/${f}.json`), 'utf8'))
-  for (const c of doc.complexes) complexes.push(c)
-}
 /** 한 동이 계단형이라 볼륨이 여럿이다. 동 단위로 모아 무게중심을 낸다. */
 const dongs = new Map()
-for (const c of complexes) {
-  for (const b of c.buildings) {
-    if (!b.dong) continue
-    const key = `${c.id}|${b.dong}`
-    const pts = b.poly.map(toPx)
-    const e = dongs.get(key) || { key, complex: c.name, dong: b.dong, xs: 0, ys: 0, n: 0 }
-    for (const [x, y] of pts) { e.xs += x; e.ys += y; e.n++ }
-    dongs.set(key, e)
-  }
+for (const b of buildings) {
+  if (!b.dong) continue
+  const e = dongs.get(b.id) || { key: b.id, dong: b.dong, xs: 0, ys: 0, n: 0 }
+  e.xs += b.cx
+  e.ys += b.cy
+  e.n++
+  dongs.set(b.id, e)
 }
 
 /** 점을 솎는다 (Douglas-Peucker) */

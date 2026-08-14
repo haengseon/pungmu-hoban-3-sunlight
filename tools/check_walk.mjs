@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PNG } from 'pngjs'
+import { carveBuildings, components, loadBuildings, loadWalk } from './lib/walkmask.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const EARTH_C = 20037508.342789244
@@ -23,106 +24,19 @@ const EARTH_C = 20037508.342789244
 // 절대 여유도 함께 준다.
 const DETOUR_MAX = 1.8
 const DETOUR_SLACK_M = 90
-
-const meta = JSON.parse(readFileSync(join(ROOT, 'web/src/data/walk.json'), 'utf8'))
-const png = PNG.sync.read(readFileSync(join(ROOT, 'web/public/walk_mask.png')))
-const { width: W, height: H } = png
-if (W !== meta.width || H !== meta.height) {
-  console.error(`마스크 ${W}x${H} 와 walk.json ${meta.width}x${meta.height} 가 다르다`)
-  process.exit(1)
-}
-const MPP = meta.metresPerPixel
-
-/** 걸을 수 있으면 1 */
-const walk = new Uint8Array(W * H)
-for (let i = 0; i < W * H; i++) walk[i] = png.data[i << 2] >= 128 ? 1 : 0
-
-// 마스크 픽셀 <-> 위경도. 캡처 affine 이 회전 없는 메르카토르 정렬이라 네 모서리를
-// 메르카토르로 바꿔 놓으면 선형이다.
-const merc = ([lon, lat]) => [
-  lon * EARTH_C / 180,
-  Math.log(Math.tan((90 + lat) * Math.PI / 360)) * EARTH_C / Math.PI,
-]
-const [tl, tr, , bl] = meta.coordinates.map(merc)
-const toPx = ([lon, lat]) => {
-  const [mx, my] = merc([lon, lat])
-  return [(mx - tl[0]) / (tr[0] - tl[0]) * W, (my - tl[1]) / (bl[1] - tl[1]) * H]
-}
-
-// --- 건물 ------------------------------------------------------------------
-const complexes = []
-for (const f of ['buildings', 'context', 'offices']) {
-  const doc = JSON.parse(readFileSync(join(ROOT, `web/src/data/${f}.json`), 'utf8'))
-  complexes.push(...doc.complexes)
-}
-/** @returns {{ring:number[][], cx:number, cy:number}[]} 픽셀 좌표의 건물들 */
-const buildings = []
-for (const c of complexes) {
-  for (const b of c.buildings) {
-    const ring = b.poly.map(toPx)
-    const cx = ring.reduce((s, p) => s + p[0], 0) / ring.length
-    const cy = ring.reduce((s, p) => s + p[1], 0) / ring.length
-    buildings.push({ id: `${c.id}|${b.dong}`, ring, cx, cy })
-  }
-}
-
-const inside = (ring, x, y) => {
-  let on = false
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i], [xj, yj] = ring[j]
-    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) on = !on
-  }
-  return on
-}
-const built = new Uint8Array(W * H)
-for (const b of buildings) {
-  let x0 = W, y0 = H, x1 = 0, y1 = 0
-  for (const [x, y] of b.ring) {
-    x0 = Math.min(x0, x); x1 = Math.max(x1, x)
-    y0 = Math.min(y0, y); y1 = Math.max(y1, y)
-  }
-  for (let y = Math.max(0, Math.floor(y0)); y < Math.min(H, Math.ceil(y1)); y++) {
-    for (let x = Math.max(0, Math.floor(x0)); x < Math.min(W, Math.ceil(x1)); x++) {
-      if (inside(b.ring, x + 0.5, y + 0.5)) built[y * W + x] = 1
-    }
-  }
-}
-
-// 걸을 수 있는 면을 성분으로 나눠 가장 큰 것을 골라 둔다. 출입점을 그냥 '가장 가까운
-// 걸을 수 있는 픽셀' 로 잡으면 라벨 테두리 같은 고립된 조각에 붙어, 멀쩡한 마스크에도
-// 길이 없다고 나온다.
-const comp = new Int32Array(W * H).fill(-1)
-let mainComp = -1
-{
-  const sizes = []
-  for (let s = 0; s < W * H; s++) {
-    if (!walk[s] || comp[s] >= 0) continue
-    const id = sizes.length
-    const q = [s]
-    comp[s] = id
-    for (let head = 0; head < q.length; head++) {
-      const i = q[head]
-      const x = i % W, y = (i - x) / W
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const nx = x + dx, ny = y + dy
-          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue
-          const j = ny * W + nx
-          if (walk[j] && comp[j] < 0) { comp[j] = id; q.push(j) }
-        }
-      }
-    }
-    sizes.push(q.length)
-  }
-  mainComp = sizes.indexOf(Math.max(...sizes))
-  console.log(`걸을 수 있는 면 ${(walk.reduce((a, b) => a + b, 0) * MPP ** 2 / 1e4).toFixed(1)} ha, `
-    + `성분 ${sizes.length}개, 가장 큰 것 ${(Math.max(...sizes) * MPP ** 2 / 1e4).toFixed(1)} ha`)
-}
-
 // 출입점이 이보다 멀면 그 동은 주 보행망에 닿아 있지 않은 것이다. 이 가드가 없으면
-// 망이 조각났을 때 출입점이 한참 떨어진 조각에 붙어, 엉뚱하게 짧은 거리가 나오며
-// 검사가 거짓 통과한다.
+// 망이 조각났을 때 출입점이 한참 떨어진 조각에 붙어 검사가 거짓 통과한다.
 const MAX_ENTRANCE_M = 60
+
+const { W, H, MPP, walk, toPx } = loadWalk(ROOT)
+const buildings = loadBuildings(ROOT, toPx)
+// 사람이 붓으로 고친 마스크라 동 모서리를 덮는 일이 생긴다. 건물 자리는 걸을 수 없으니
+// make_routes 와 똑같이 읽을 때 깎아 낸다 - 한쪽만 통과하는 일이 없어야 한다.
+const cut = carveBuildings(walk, buildings, W, H, MPP)
+const { comp, sizes, main: mainComp } = components(walk, W, H)
+console.log(`건물 자리 ${(cut * MPP ** 2).toFixed(0)} m2 깎음 · `
+  + `걸을 수 있는 면 ${(walk.reduce((a2, b2) => a2 + b2, 0) * MPP ** 2 / 1e4).toFixed(1)} ha, `
+  + `성분 ${sizes.length}개, 가장 큰 것 ${(Math.max(...sizes) * MPP ** 2 / 1e4).toFixed(1)} ha`)
 
 /** 그 동에서 걸어 나오는 지점 - 무게중심에서 가장 가까운, 주 보행망 위의 픽셀 */
 function entrance(b) {
@@ -251,17 +165,13 @@ for (const [label, a, b] of PAIRS) {
   const bx = eb % W, by = (eb - bx) / W
   const straight = Math.hypot(ax - bx, ay - by) * MPP
   const detour = r.metres / straight
-  const through = r.path.filter((i) => built[i]).length
-  // 길이 아예 없거나 건물을 뚫는 것은 실패다. 많이 도는 것은 경고다 - 마스크에 아직
-  // 안 이어진 데가 있다는 뜻이고, 그건 편집기에서 손으로 이어 주라는 신호다.
+  // 건물 관통은 이제 검사하지 않는다 - 마스크를 읽을 때 건물 자리를 깎아 내므로
+  // 구조적으로 일어날 수 없다. 남은 판정은 '길이 있는가' 와 '얼마나 도는가' 다.
   const far = r.metres > Math.max(straight * DETOUR_MAX, straight + DETOUR_SLACK_M)
-  const ok = through === 0
   console.log(`${label} ${a} -> ${b}: ${r.metres.toFixed(0)} m `
     + `(직선 ${straight.toFixed(0)} m, ${detour.toFixed(2)}배)`
-    + `${through ? ` 건물 관통 ${through} px` : ''} `
-    + `${!ok ? '실패' : far ? '경고: 많이 돈다 - 마스크가 끊겼는지 보라' : 'OK'}`)
-  if (!ok) bad++
-  else if (far) warn++
+    + `${far ? ' 경고: 많이 돈다 - 마스크가 끊겼는지 보라' : 'OK'}`)
+  if (far) warn++
   routes.push(r.path)
 }
 
