@@ -83,10 +83,12 @@ npm run dev            # http://127.0.0.1:5173
 | `add_context.py` | 그라센트 1·2차 → `web/src/data/context.json` |
 | `make_landuse.py` | 토지이용계획도 → `web/public/landuse.json` |
 | `make_offices.py` | 업무시설 D1~D4 예상 매스 → `web/src/data/offices.json` |
+| `make_walk.py` | 보행 가능 면을 픽셀로 → `web/public/walk_mask.png` (건물 폴리곤 뒤에 돌린다) |
 | `check_sun.mjs` | 태양위치·그림자 길이·데이터 정합성 + 주택형 셀 |
 | `check_shadow.mjs` | 벽면·옥상 그림자 경계를 씬 레이캐스트로 이론값과 대조 |
 | `check_resize.mjs` | 지도 크기가 바뀐 뒤에도 3D 가 같은 자리에 그려지는지 |
 | `check_zoom.mjs` | 건물 높이를 maplibre 자신의 fill-extrusion 과 여러 줌에서 대조 |
+| `check_walk.mjs` | 보행 마스크로 건물 사이를 실제로 A* 로 이어 본다 |
 | `smoke.mjs` | 실제 브라우저로 열어 볼륨 수·UI·렌더 시간 보고 + 스크린샷 |
 
 ```bash
@@ -101,8 +103,10 @@ NAME=kakao_wide  SCALE=0.5 OUT=ground_wide python tools/make_ground.py
 python tools/add_context.py
 python tools/make_landuse.py
 python tools/make_offices.py     # landuse.json 을 읽으므로 순서를 지킨다
+python tools/make_walk.py        # 건물 폴리곤을 빼므로 refine/add_context 뒤에
 node tools/check_sun.mjs && node tools/check_shadow.mjs
-node tools/check_resize.mjs && node tools/check_zoom.mjs && node tools/smoke.mjs
+node tools/check_resize.mjs && node tools/check_zoom.mjs
+node tools/check_walk.mjs && node tools/smoke.mjs
 ```
 
 앱은 카카오맵을 쓰지 않지만 **푸트프린트의 출처는 카카오**다. 그래서 트레이싱만
@@ -172,6 +176,27 @@ node tools/check_resize.mjs && node tools/check_zoom.mjs && node tools/smoke.mjs
 배치는 최소외접 사각형을 줄여 가운데 놓고 긴 변을 따라 8 m 씩 띄워 나눈다.
 **획지 번호는 도면에 글자로 없어** 지구의 블록 번호 순서(북서 → 남동)를 따라 매겼다.
 `kind: planned` 로 내고 렌더러가 청록 반투명으로 그려 실측 동과 구분한다.
+
+## 보행 가능 면 (길찾기용)
+
+건물 ↔ 건물 길찾기를 하려면 도로 중심선이 아니라 **면**이 필요하다. 단지 안 보행로는
+공개 데이터가 아예 없고 카카오만 그린다. `make_walk.py` 가 캡처에서 캐내
+`web/public/walk_mask.png`(1비트, 0.498 m/px)로 낸다.
+
+- 흰색은 길·건물·나대지가 나눠 쓴다. **배경 땅 `(250,250,250)` 과 길 `(254,254,254)` 은
+  넷밖에 차이가 안 나서** tol 을 6 만 줘도 통째로 섞이고, 그러면 캡처의 59% 가 '길'이
+  되어 길찾기가 논밭을 가로지른다. tol 은 2 다. 모양이 근거다 — 갈라 놓고 재면 배경은
+  최대 내접반경 134 m, 길은 21.9 m(도로 폭 그대로)다.
+- 단지 안은 또 다르다. 필지 바닥 `(240,232,216)` 위에 단지 내 도로가 `(232,224,206)`
+  으로 그려진다. 차이가 8뿐이라 tol 4 를 넘기면 필지가 딸려 온다.
+- 건물은 흰 면과 색이 같아 색으로 못 가른다. 대신 폴리곤이 있으니 1.5 m 부풀려 뺀다.
+- 카카오는 글자에 흰 테두리를 둘러 그린다. **열림을 닫힘보다 먼저** 해야 한다 — 순서를
+  바꾸면 라벨 자리가 통째로 '길' 이 된다.
+- 자동 추출은 여기까지다. 나머지는 **사람이 `web/walk.html` 에서 브러시로 고친다**
+  (개발 서버 전용, `vite build` 에 안 들어간다). 저장하면 마스크를 덮어쓰므로
+  `make_walk.py` 는 마스크가 이미 있으면 **다시 쓰지 않는다** (`FORCE=1` 로 강제).
+- 합격은 눈이 아니라 `check_walk.mjs` 가 정한다. 끊긴 한 픽셀은 안 보이지만 길찾기는
+  거기서 실패한다. 길이 없거나 건물을 뚫으면 실패, 많이 돌면 경고(손볼 자리라는 뜻).
 
 ## 렌더링
 

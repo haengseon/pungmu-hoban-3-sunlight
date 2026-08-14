@@ -16,6 +16,9 @@ tools/out/
 # 브이월드 기본지도만 깔고 그대로 돈다.
 web/public/ground*.webp
 
+# 편집기가 저장 직전에 미는 보행 마스크 백업
+web/public/walk_mask.bak.png
+
 # refine_footprints.py 가 남기는 직전 백업
 web/src/data/*.pre-kakao
 

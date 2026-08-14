@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>보행 마스크 편집기</title>
+    <!--
+      tools/make_walk.py 가 뽑은 보행 가능 면을 사람이 손으로 고치는 자리.
+
+      자동 추출은 절대 다 맞지 않는다 - 캡처에서 길과 건물과 나대지가 색을 나눠 쓰고,
+      POI 아이콘과 글자가 길을 끊는다. 그래서 '기계가 초안, 사람이 마무리' 로 간다.
+      건물 사이 길찾기는 끊긴 한 픽셀에서 실패하므로 마무리가 곧 품질이다.
+
+      개발 서버 전용이다. vite 는 web/ 루트의 html 을 그대로 서빙하지만
+      rollupOptions.input 이 없어 vite build 에는 들어가지 않는다. 바탕 캡처와 마스크
+      읽기·쓰기는 vite.config.js 의 walkEditor 플러그인이 열어 준다(apply: 'serve').
+
+      마스크 원본은 전체 해상도(5500x3700) 오프스크린 캔버스 하나다. 화면에는 보이는
+      영역만 잘라 그린다 - 20 MP 를 매 프레임 통째로 다루지 않기 위해서다.
+    -->
+    <style>
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; overflow: hidden; }
+      body {
+        background: #14171a; color: #e8eaed;
+        font: 13px/1.45 "Malgun Gothic", -apple-system, "Segoe UI", sans-serif;
+        user-select: none;
+      }
+      #view { position: absolute; inset: 0; cursor: crosshair; display: block; }
+      #view.pan { cursor: grab; }
+      .bar {
+        position: absolute; z-index: 2; top: 12px; left: 12px;
+        display: flex; align-items: center; gap: 14px;
+        padding: 10px 14px; border-radius: 10px;
+        background: rgba(20, 23, 26, 0.92);
+        box-shadow: 0 2px 14px rgba(0, 0, 0, 0.5);
+      }
+      .bar b { font-weight: 700; }
+      .bar span { color: #9aa3ad; }
+      .bar button {
+        padding: 6px 12px; border: 1px solid #39414a; border-radius: 7px;
+        background: #232a31; color: inherit; font: inherit; cursor: pointer;
+      }
+      .bar button:hover { background: #2d353e; }
+      .bar button.on { background: #1f6feb; border-color: #1f6feb; }
+      .bar button:disabled { opacity: 0.4; cursor: default; }
+      #dirty { color: #ffb454; }
+      .help {
+        position: absolute; z-index: 2; left: 12px; bottom: 12px;
+        padding: 10px 14px; border-radius: 10px; color: #9aa3ad;
+        background: rgba(20, 23, 26, 0.85); line-height: 1.7;
+      }
+      .help kbd {
+        padding: 1px 6px; border: 1px solid #39414a; border-radius: 4px;
+        background: #232a31; color: #e8eaed; font: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+
+    <div class="bar">
+      <b>보행 마스크</b>
+      <button id="paint" class="on">칠하기</button>
+      <button id="erase">지우기</button>
+      <span>브러시 <b id="size">12</b> m</span>
+      <button id="undo" disabled>되돌리기</button>
+      <button id="save">저장</button>
+      <span id="dirty"></span>
+      <span id="pos"></span>
+    </div>
+
+    <div class="help">
+      <kbd>드래그</kbd> 칠하기 · <kbd>우클릭 드래그</kbd> 지우기 ·
+      <kbd>휠</kbd> 확대 · <kbd>스페이스</kbd>+드래그 이동<br />
+      <kbd>[</kbd> <kbd>]</kbd> 브러시 크기 · <kbd>E</kbd> 모드 전환 ·
+      <kbd>Ctrl+Z</kbd> 되돌리기 · <kbd>Ctrl+S</kbd> 저장
+    </div>
+
+    <script type="module">
+      const MPP = 0.4976        // walk.json 과 같은 값. 브러시 크기를 미터로 보여준다
+      const MAX_UNDO = 20
+      const view = document.getElementById('view')
+      const ctx = view.getContext('2d')
+      const ui = {
+        paint: document.getElementById('paint'),
+        erase: document.getElementById('erase'),
+        size: document.getElementById('size'),
+        undo: document.getElementById('undo'),
+        save: document.getElementById('save'),
+        dirty: document.getElementById('dirty'),
+        pos: document.getElementById('pos'),
+      }
+
+      const load = (url) => new Promise((ok, no) => {
+        const im = new Image()
+        im.onload = () => ok(im)
+        im.onerror = () => no(new Error(`${url} 를 못 읽었다`))
+        im.src = url
+      })
+
+      const [base, maskImg] = await Promise.all([
+        load('/walk/base.png'), load(`/walk/mask.png?t=${Date.now()}`),
+      ])
+
+      // 마스크 원본. 걸을 수 있는 곳은 흰색, 나머지는 투명이다 - 투명이어야 화면에
+      // 겹칠 때 source-in 으로 색만 갈아 끼울 수 있다. 저장할 때만 검정을 깐다.
+      const mask = document.createElement('canvas')
+      mask.width = base.naturalWidth
+      mask.height = base.naturalHeight
+      const mc = mask.getContext('2d', { willReadFrequently: true })
+      mc.drawImage(maskImg, 0, 0, mask.width, mask.height)
+      {
+        // 읽어 온 PNG 는 검정 바탕이다. 검정을 투명으로 바꿔 둔다.
+        const d = mc.getImageData(0, 0, mask.width, mask.height)
+        const p = d.data
+        for (let i = 0; i < p.length; i += 4) {
+          const on = p[i] >= 128
+          p[i] = p[i + 1] = p[i + 2] = 255
+          p[i + 3] = on ? 255 : 0
+        }
+        mc.putImageData(d, 0, 0)
+      }
+
+      // 화면에 겹칠 때 쓰는 임시 캔버스. 보이는 크기라 작다.
+      const tint = document.createElement('canvas')
+      const tc = tint.getContext('2d')
+
+      const cam = { x: mask.width / 2, y: mask.height / 2, scale: 0.25 }
+      const brush = { r: 12, mode: 'paint' }   // r 은 화면이 아니라 마스크 픽셀 기준
+      let dirty = false
+      const undos = []
+
+      const toWorld = (px, py) => ({
+        x: cam.x + (px - view.width / 2) / cam.scale,
+        y: cam.y + (py - view.height / 2) / cam.scale,
+      })
+
+      function draw() {
+        const vw = view.width, vh = view.height
+        const sw = vw / cam.scale, sh = vh / cam.scale
+        const sx = cam.x - sw / 2, sy = cam.y - sh / 2
+        ctx.imageSmoothingEnabled = cam.scale < 1
+        ctx.fillStyle = '#14171a'
+        ctx.fillRect(0, 0, vw, vh)
+        ctx.drawImage(base, sx, sy, sw, sh, 0, 0, vw, vh)
+
+        if (tint.width !== vw || tint.height !== vh) {
+          tint.width = vw
+          tint.height = vh
+        }
+        tc.clearRect(0, 0, vw, vh)
+        tc.imageSmoothingEnabled = ctx.imageSmoothingEnabled
+        tc.drawImage(mask, sx, sy, sw, sh, 0, 0, vw, vh)
+        tc.globalCompositeOperation = 'source-in'
+        tc.fillStyle = '#00d46a'
+        tc.fillRect(0, 0, vw, vh)
+        tc.globalCompositeOperation = 'source-over'
+        ctx.globalAlpha = 0.55
+        ctx.drawImage(tint, 0, 0)
+        ctx.globalAlpha = 1
+      }
+
+      function resize() {
+        view.width = innerWidth
+        view.height = innerHeight
+        draw()
+      }
+      addEventListener('resize', resize)
+
+      // --- 그리기 -----------------------------------------------------------
+      // 되돌리기는 획 단위다. 전체 스냅샷은 획당 80 MB 라 못 쓰므로, 붓이 닿는
+      // 사각형만 찍기 직전에 떠 두고 되돌릴 때 역순으로 되붙인다.
+      let stroke = null
+
+      function dab(x, y) {
+        const r = brush.r
+        const x0 = Math.max(0, Math.floor(x - r - 1))
+        const y0 = Math.max(0, Math.floor(y - r - 1))
+        const x1 = Math.min(mask.width, Math.ceil(x + r + 1))
+        const y1 = Math.min(mask.height, Math.ceil(y + r + 1))
+        if (x1 <= x0 || y1 <= y0) return
+        if (stroke) {
+          stroke.push({ x: x0, y: y0, d: mc.getImageData(x0, y0, x1 - x0, y1 - y0) })
+        }
+        mc.globalCompositeOperation =
+          brush.mode === 'erase' ? 'destination-out' : 'source-over'
+        mc.fillStyle = '#fff'
+        mc.beginPath()
+        mc.arc(x, y, r, 0, Math.PI * 2)
+        mc.fill()
+        mc.globalCompositeOperation = 'source-over'
+        setDirty(true)
+      }
+
+      function setDirty(v) {
+        dirty = v
+        ui.dirty.textContent = v ? '● 저장 안 됨' : ''
+      }
+
+      function endStroke() {
+        if (stroke && stroke.length) {
+          undos.push(stroke)
+          while (undos.length > MAX_UNDO) undos.shift()
+          ui.undo.disabled = false
+        }
+        stroke = null
+      }
+
+      function undo() {
+        const s = undos.pop()
+        if (!s) return
+        for (let i = s.length - 1; i >= 0; i--) mc.putImageData(s[i].d, s[i].x, s[i].y)
+        ui.undo.disabled = !undos.length
+        setDirty(true)
+        draw()
+      }
+
+      // --- 입력 -------------------------------------------------------------
+      let painting = false, panning = false, space = false, last = null
+      view.addEventListener('contextmenu', (e) => e.preventDefault())
+
+      view.addEventListener('pointerdown', (e) => {
+        view.setPointerCapture(e.pointerId)
+        last = { x: e.clientX, y: e.clientY }
+        if (space || e.button === 1) {
+          panning = true
+          return
+        }
+        brush.mode = e.button === 2 ? 'erase' : modeButton()
+        painting = true
+        stroke = []
+        const w = toWorld(e.clientX, e.clientY)
+        dab(w.x, w.y)
+        draw()
+      })
+
+      view.addEventListener('pointermove', (e) => {
+        const w = toWorld(e.clientX, e.clientY)
+        ui.pos.textContent = `${Math.round(w.x)}, ${Math.round(w.y)} px`
+        if (panning) {
+          cam.x -= (e.clientX - last.x) / cam.scale
+          cam.y -= (e.clientY - last.y) / cam.scale
+          last = { x: e.clientX, y: e.clientY }
+          return draw()
+        }
+        if (!painting) return
+        // 붓이 띄엄띄엄 찍히지 않게 이전 점과 잇는다
+        const p = toWorld(last.x, last.y)
+        const dist = Math.hypot(w.x - p.x, w.y - p.y)
+        const step = Math.max(1, brush.r / 3)
+        for (let t = step; t <= dist; t += step) {
+          dab(p.x + (w.x - p.x) * (t / dist), p.y + (w.y - p.y) * (t / dist))
+        }
+        dab(w.x, w.y)
+        last = { x: e.clientX, y: e.clientY }
+        draw()
+      })
+
+      const stop = () => {
+        if (painting) endStroke()
+        painting = panning = false
+      }
+      view.addEventListener('pointerup', stop)
+      view.addEventListener('pointercancel', stop)
+
+      view.addEventListener('wheel', (e) => {
+        e.preventDefault()
+        const before = toWorld(e.clientX, e.clientY)
+        cam.scale = Math.min(8, Math.max(0.08, cam.scale * (e.deltaY < 0 ? 1.2 : 1 / 1.2)))
+        const after = toWorld(e.clientX, e.clientY)
+        cam.x += before.x - after.x
+        cam.y += before.y - after.y
+        draw()
+      }, { passive: false })
+
+      const modeButton = () => (ui.erase.classList.contains('on') ? 'erase' : 'paint')
+      const setMode = (m) => {
+        brush.mode = m
+        ui.paint.classList.toggle('on', m === 'paint')
+        ui.erase.classList.toggle('on', m === 'erase')
+      }
+      ui.paint.onclick = () => setMode('paint')
+      ui.erase.onclick = () => setMode('erase')
+      ui.undo.onclick = undo
+
+      const setSize = (r) => {
+        brush.r = Math.min(200, Math.max(1, r))
+        ui.size.textContent = (brush.r * 2 * MPP).toFixed(0)
+      }
+      setSize(brush.r)
+
+      addEventListener('keydown', (e) => {
+        if (e.code === 'Space') { space = true; view.classList.add('pan'); e.preventDefault() }
+        else if (e.key === '[') setSize(brush.r - Math.max(1, brush.r * 0.25))
+        else if (e.key === ']') setSize(brush.r + Math.max(1, brush.r * 0.25))
+        else if (e.key === 'e' || e.key === 'E') setMode(modeButton() === 'paint' ? 'erase' : 'paint')
+        else if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo() }
+        else if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save() }
+      })
+      addEventListener('keyup', (e) => {
+        if (e.code === 'Space') { space = false; view.classList.remove('pan') }
+      })
+
+      // --- 저장 -------------------------------------------------------------
+      async function save() {
+        ui.save.disabled = true
+        ui.save.textContent = '저장 중'
+        // 투명을 다시 검정으로 깔아 1비트로 읽히게 만든다
+        const flat = document.createElement('canvas')
+        flat.width = mask.width
+        flat.height = mask.height
+        const fc = flat.getContext('2d')
+        fc.fillStyle = '#000'
+        fc.fillRect(0, 0, flat.width, flat.height)
+        fc.drawImage(mask, 0, 0)
+        const blob = await new Promise((ok) => flat.toBlob(ok, 'image/png'))
+        const r = await fetch('/walk/mask.png', { method: 'POST', body: blob })
+        ui.save.disabled = false
+        ui.save.textContent = '저장'
+        if (r.ok) setDirty(false)
+        else alert('저장 실패')
+      }
+      ui.save.onclick = save
+
+      addEventListener('beforeunload', (e) => {
+        if (dirty) { e.preventDefault(); e.returnValue = '' }
+      })
+
+      // 처음에는 단지 쪽이 보이게 열어 준다 (캡처 한가운데가 지구 중심이다)
+      resize()
+      window.__walk = { cam, mask, brush, draw }
+    </script>
+  </body>
+</html>

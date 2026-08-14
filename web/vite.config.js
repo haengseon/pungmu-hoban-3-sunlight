@@ -1,9 +1,51 @@
+import { copyFileSync, createReadStream, existsSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+
+// walk.html(보행 마스크 편집기)용 경로. 개발 서버에서만 산다 - 배포본에는 편집기도
+// 이 경로도 없고, 나가는 것은 사람이 고친 walk_mask.png 뿐이다.
+//
+// 바탕 캡처는 tools/out/ 에 있는데 그 디렉터리는 vite 의 서빙 범위 밖이라(그리고
+// gitignore 대상이라) 여기서 직접 흘려준다.
+const walkEditor = () => ({
+  name: 'walk-editor',
+  apply: 'serve',
+  configureServer(server) {
+    const CAP = resolve(ROOT, 'tools/out/kakao_wide.png')
+    const MASK = resolve(ROOT, 'web/public/walk_mask.png')
+    const BAK = resolve(ROOT, 'web/public/walk_mask.bak.png')
+
+    const sendPng = (file, res) => {
+      if (!existsSync(file)) {
+        res.statusCode = 404
+        return res.end(`${file} 이 없다`)
+      }
+      res.setHeader('Content-Type', 'image/png')
+      res.setHeader('Content-Length', statSync(file).size)
+      res.setHeader('Cache-Control', 'no-store')
+      createReadStream(file).pipe(res)
+    }
+
+    server.middlewares.use('/walk/base.png', (req, res) => sendPng(CAP, res))
+    server.middlewares.use('/walk/mask.png', (req, res) => {
+      if (req.method !== 'POST') return sendPng(MASK, res)
+      const chunks = []
+      req.on('data', (c) => chunks.push(c))
+      req.on('end', () => {
+        const buf = Buffer.concat(chunks)
+        // 브러시 사고는 되돌릴 수 있어야 한다. 덮어쓰기 전에 한 번 밀어 둔다.
+        if (existsSync(MASK)) copyFileSync(MASK, BAK)
+        writeFileSync(MASK, buf)
+        server.config.logger.info(`walk_mask.png 저장 ${(buf.length / 1e3).toFixed(0)} KB`)
+        res.end('ok')
+      })
+    })
+  },
+})
 
 // JS·CSS 주석은 최소화가 알아서 떨군다. index.html 은 손대지 않으므로 여기만 따로 턴다 -
 // 소스에는 왜 그렇게 했는지가 남아 있어야 하고, 배포본에는 남을 이유가 없다.
@@ -16,7 +58,7 @@ const stripHtmlComments = () => ({
 })
 
 export default defineConfig({
-  plugins: [react(), stripHtmlComments()],
+  plugins: [react(), stripHtmlComments(), walkEditor()],
   // 키는 저장소 루트의 .env 한 곳에서만 관리한다. tools/ 파이프라인도 같은 파일을
   // 읽으므로 web/ 와 tools/ 가 서로 다른 값을 보는 일이 없다.
   envDir: ROOT,
