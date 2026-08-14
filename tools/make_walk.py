@@ -41,6 +41,8 @@ BUILDINGS = [
     os.path.join(ROOT, "web", "src", "data", "context.json"),
     os.path.join(ROOT, "web", "src", "data", "offices.json"),
 ]
+# 마스크를 만들 범위의 기준이 되는 단지. 이 둘레만 남기고 나머지 동네는 버린다.
+RANGE_COMPLEXES = {"prugio", "hoban1", "hoban2", "hoban3", "hoban3_amenity"}
 
 EARTH_C = 20037508.342789244
 
@@ -78,6 +80,17 @@ BLOCK_COLORS = [
 # 건물은 흰 면과 색이 같다. 폴리곤으로 빼되, 벽에 딱 붙은 픽셀은 걸을 수 없으니
 # 조금 넉넉히 뺀다 (사람 어깨 폭 + 트레이싱 오차).
 BUILDING_PAD_M = 1.5
+
+# 차로 한복판은 걷는 데가 아니다. 걸을 수 있는 면의 가장자리에서 이만큼만 남기고
+# 가운데를 판다 - 넓은 도로는 양쪽 보도 두 줄이 되고, 원래 이보다 좁은 단지 내
+# 보행로는 그대로 남는다.
+#
+# 이러면 도로 하나가 양쪽으로 갈라져 '건너가기' 가 사라진다. 횡단보도 데이터가 없어
+# 자동으로는 못 잇는다 - 편집기에서 손으로 칠하라는 뜻이고, 그러라고 만든 것이다.
+SIDEWALK_M = 4.0
+
+# 다 칠할 필요 없다. 더마크·풍무 1~3차와 그 주변 상가까지가 범위다.
+RANGE_PAD_M = 200.0
 
 MIN_BLOB_M2 = 400     # 이보다 작은 조각은 길이 아니다 (라벨·아이콘 잔해)
 CLOSE_M = 3.0         # POI 아이콘·글자가 길을 끊은 자리를 메운다
@@ -118,6 +131,9 @@ def main() -> None:
     # 건물을 뺀다. 흰 면과 색이 같아 색으로는 못 가르지만 폴리곤은 이미 있다.
     stamp = Image.new("1", (w, h), 0)
     d = ImageDraw.Draw(stamp)
+    # 범위 판정용은 따로 찍는다 - 분석 대상 단지만이다 (그라센트·업무시설 제외)
+    range_stamp = Image.new("1", (w, h), 0)
+    rd = ImageDraw.Draw(range_stamp)
     n = 0
     for src in BUILDINGS:
         if not os.path.exists(src):
@@ -125,7 +141,10 @@ def main() -> None:
         doc = json.load(open(src, encoding="utf-8"))
         for c in doc["complexes"]:
             for b in c["buildings"]:
-                d.polygon([to_px(meta, lon, lat) for lon, lat in b["poly"]], fill=1)
+                poly = [to_px(meta, lon, lat) for lon, lat in b["poly"]]
+                d.polygon(poly, fill=1)
+                if c["id"] in RANGE_COMPLEXES:
+                    rd.polygon(poly, fill=1)
                 n += 1
     pad = max(1, int(round(BUILDING_PAD_M / mpp)))
     built = ndi.binary_dilation(np.asarray(stamp, bool), np.ones((pad * 2 + 1,) * 2))
@@ -140,6 +159,21 @@ def main() -> None:
     walk = ndi.binary_opening(walk, np.ones((k_open, k_open)))
     walk = ndi.binary_closing(walk, np.ones((k_close, k_close)))
     walk &= ~built     # 닫으면서 건물을 다시 먹었을 수 있다
+
+    # 차로 가운데를 판다. 가장자리에서 SIDEWALK_M 안쪽만 남긴다.
+    edge = ndi.distance_transform_edt(walk) * mpp
+    wide = walk & (edge > SIDEWALK_M)
+    walk &= ~wide
+    print(f"  차로 가운데 {wide.sum() * mpp**2 / 10000:.1f} ha 제외 "
+          f"(가장자리 {SIDEWALK_M} m 만 남김)")
+
+    # 범위를 자른다. 분석 대상 네 단지와 그 부대시설 둘레만 본다.
+    near = ndi.binary_dilation(
+        np.asarray(range_stamp, bool),
+        ndi.generate_binary_structure(2, 2),
+        iterations=int(round(RANGE_PAD_M / mpp)))
+    walk &= near
+    print(f"  범위 밖 제외 (대상 단지에서 {RANGE_PAD_M:.0f} m 안쪽만)")
 
     lab, cnt = ndi.label(walk)
     if cnt:
