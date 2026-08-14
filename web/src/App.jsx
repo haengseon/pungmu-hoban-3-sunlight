@@ -3,6 +3,7 @@ import { Map as MapLibre, Marker, NavigationControl } from 'maplibre-gl'
 import doc from './data/buildings.json'
 import context from './data/context.json'
 import offices from './data/offices.json'
+import walkRoutes from './data/routes.json'
 import ground from './data/ground.json'
 import groundWide from './data/ground_wide.json'
 import { Buildings3D } from './lib/buildings3d.js'
@@ -41,6 +42,17 @@ const labelOf = (use) => LABEL_ALIAS[use] || use.replace(/용지$/, '')
 // 가장 어둡다 (겨울 18시가 -8.3°).
 const DUSK_FROM = 6
 const DUSK_TO = -8
+const EMPTY = { type: 'FeatureCollection', features: [] }
+
+// 걷는 수고는 거리에서만 뽑는다. 이 지구는 표고 7~9 m 라 사실상 평지여서 경사가
+// 끼어들 자리가 없다. 숫자만 보여주면 감이 안 오므로 등급으로도 말해 준다.
+const EFFORT = [[5, '가깝다'], [10, '걸을 만하다'], [15, '조금 멀다'], [Infinity, '멀다']]
+const effortOf = (min) => EFFORT.find(([m]) => min <= m)[1]
+
+// 점선이 흐르는 속도. 대시 배열을 매 프레임 굴린다.
+const FLOW_PERIOD_MS = 900
+const WALKER_MS = 3600 // 진행 점이 경로를 한 번 완주하는 시간
+
 const PITCH = 45 // 열자마자 3D 인 게 보일 만큼은 눕히되, 그림자 바닥은 계속 읽히게
 // 위쪽은 넉넉하게: 기울인 화면에서 29층 타워는 자기 푸트프린트보다 한참 위까지 솟는다
 const PAD = { top: 80, bottom: 24, left: 24, right: 24 }
@@ -199,6 +211,7 @@ export default function App() {
   const [wide, setWide] = useState(false)
   // 이름표는 계획을 읽을 때만 필요하다. 3D 를 들여다볼 때는 가리기만 하므로 따로 끈다.
   const [tags, setTags] = useState(true)
+  const routeRef = useRef({ raf: 0, marker: null })
   const [noteOff, setNoteOff] = useState(false)
 
   const date = useMemo(() => {
@@ -299,6 +312,32 @@ export default function App() {
         paint: { 'line-color': '#d9451d', 'line-width': 2.5, 'line-dasharray': [3, 2] },
       })
 
+      // 도보 경로. 세 겹으로 그린다 - 바깥 발광, 본선, 그 위를 흐르는 점선.
+      // Buildings3D 보다 **먼저** 얹어 건물에 가려지게 한다. 지면을 걷는 길이니까.
+      map.addSource('route', { type: 'geojson', data: EMPTY })
+      map.addLayer({
+        id: 'route-glow',
+        type: 'line',
+        source: 'route',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#ffffff', 'line-width': 16, 'line-opacity': 0.45,
+          'line-blur': 6 },
+      })
+      map.addLayer({
+        id: 'route-line',
+        type: 'line',
+        source: 'route',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#1f6feb', 'line-width': 5.5 },
+      })
+      map.addLayer({
+        id: 'route-flow',
+        type: 'line',
+        source: 'route',
+        layout: { 'line-cap': 'butt' },
+        paint: { 'line-color': '#ffd54a', 'line-width': 5.5, 'line-dasharray': [0, 4, 3] },
+      })
+
       layer = new Buildings3D(map, {
         buildings: geom.buildings, lat0: geom.lat, lon0: geom.lon,
       })
@@ -393,6 +432,66 @@ export default function App() {
     if (ready) layerRef.current?.setHidden(hidden)
   }, [ready, hidden])
 
+  // 고른 동에서 풍무역 2번 출구까지. 경로는 tools/make_routes.mjs 가 미리 구워 둔 것을
+  // 그리기만 한다 - 동은 서른몇 개고 목적지는 하나라 런타임에 길찾기를 할 이유가 없다.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map || !map.getSource('route')) return undefined
+    const r = selKey ? walkRoutes.routes[selKey] : null
+    const st = routeRef.current
+    cancelAnimationFrame(st.raf)
+    st.marker?.remove()
+    st.marker = null
+    if (!r) {
+      map.getSource('route').setData(EMPTY)
+      return undefined
+    }
+    map.getSource('route').setData({
+      type: 'Feature', properties: {},
+      geometry: { type: 'LineString', coordinates: r.line },
+    })
+
+    const el = document.createElement('div')
+    el.className = 'walker'
+    st.marker = new Marker({ element: el, anchor: 'center' })
+      .setLngLat(r.line[0]).addTo(map)
+
+    const slow = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (slow) return () => { st.marker?.remove(); st.marker = null }
+
+    // 점을 따라 움직이려면 각 마디 길이가 필요하다 (위경도라 위도 보정만 넣는다)
+    const k = Math.cos(r.line[0][1] * Math.PI / 180)
+    const seg = []
+    let total = 0
+    for (let i = 1; i < r.line.length; i++) {
+      const dx = (r.line[i][0] - r.line[i - 1][0]) * k
+      const dy = r.line[i][1] - r.line[i - 1][1]
+      total += Math.hypot(dx, dy)
+      seg.push(total)
+    }
+    const t0 = performance.now()
+    const tick = (t) => {
+      const phase = ((t - t0) % FLOW_PERIOD_MS) / FLOW_PERIOD_MS
+      // 대시 배열의 첫 칸을 늘였다 줄이며 점선을 흐르게 한다
+      map.setPaintProperty('route-flow', 'line-dasharray',
+        [phase * 7, 4, 3, 0.0001])
+      const u = ((t - t0) % WALKER_MS) / WALKER_MS * total
+      let i = seg.findIndex((v) => v >= u)
+      if (i < 0) i = seg.length - 1
+      const prev = i ? seg[i - 1] : 0
+      const f = (u - prev) / Math.max(seg[i] - prev, 1e-9)
+      const a = r.line[i], b = r.line[i + 1] || a
+      st.marker.setLngLat([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f])
+      st.raf = requestAnimationFrame(tick)
+    }
+    st.raf = requestAnimationFrame(tick)
+    return () => {
+      cancelAnimationFrame(st.raf)
+      st.marker?.remove()
+      st.marker = null
+    }
+  }, [ready, selKey])
+
   return (
     <div className={`wrap${wide ? ' wide' : ''}`}>
       <header>
@@ -446,6 +545,14 @@ export default function App() {
                 {hidden.has(selKey) ? '보이기' : '숨기기'}
               </button>
               <button onClick={() => setSel(null)} aria-label="선택 해제">×</button>
+            </div>
+          )}
+          {selKey && walkRoutes.routes[selKey] && (
+            <div className="walk">
+              <b>풍무역 2번 출구</b>
+              <span>{walkRoutes.routes[selKey].metres.toLocaleString()} m</span>
+              <span>도보 {Math.max(1, Math.round(walkRoutes.routes[selKey].seconds / 60))}분</span>
+              <em>{effortOf(walkRoutes.routes[selKey].seconds / 60)}</em>
             </div>
           )}
           {hidden.size > 0 && (

@@ -245,6 +245,33 @@ header h1 {
   background: var(--tag);
 }
 
+/* 도보 경로 요약. 거리와 시간, 그리고 감이 오게 등급 한 마디. */
+.walk {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55em;
+  padding: 0.4em 0.8em;
+  border-radius: 999px;
+  background: rgba(31, 111, 235, 0.92);
+  box-shadow: 0 1px 8px rgba(31, 111, 235, 0.35);
+  color: #fff;
+  font-size: var(--fs-small);
+  white-space: nowrap;
+}
+.walk b { font-weight: 700; }
+.walk span { color: rgba(255, 255, 255, 0.85); }
+.walk em { font-style: normal; font-weight: 700; color: #ffd54a; }
+
+/* 경로를 따라 걷는 점 */
+.walker {
+  width: 14px; height: 14px;
+  border: 2.5px solid #fff;
+  border-radius: 50%;
+  background: #ffd54a;
+  box-shadow: 0 0 0 4px rgba(255, 213, 74, 0.35), 0 1px 4px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
 /* 블록 코드. 도면에서 그 단지 땅을 부르는 이름이라 용지 이름표와는 결이 달라
    짙은 알약으로 따로 세운다. */
 .block-tag {
