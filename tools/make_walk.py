@@ -91,6 +91,16 @@ SIDEWALK_M = 6.0
 
 # 다 칠할 필요 없다. 더마크·풍무 1~3차와 그 주변 상가까지가 범위다.
 RANGE_PAD_M = 200.0
+# 목적지(풍무역 2번 출구)도 범위에 들어와야 한다. trace.html 캡처에서 찍은 좌표다.
+RANGE_POINTS = [(126.7319431, 37.6124640, 260.0)]
+
+# 차로 가운데를 파면 도로 하나가 좌우 두 줄로 갈라져 건널 데가 없어진다. 횡단보도는
+# 공개 데이터가 없어 자동으로 만들 수 없으므로, 갈라진 조각들을 **가장 짧게 건널 수
+# 있는 자리**에서 이어 준다. 대개 교차로와 단지 출입구에 떨어지지만 실제 횡단보도와
+# 다를 수 있다 - 어긋난 곳은 편집기에서 고치라고 만든 구조다.
+BRIDGE_MAX_M = 45.0   # 이보다 멀면 건너는 곳이 아니다
+BRIDGE_W_M = 4.0
+BRIDGE_ROUNDS = 6
 
 MIN_BLOB_M2 = 400     # 이보다 작은 조각은 길이 아니다 (라벨·아이콘 잔해)
 CLOSE_M = 3.0         # POI 아이콘·글자가 길을 끊은 자리를 메운다
@@ -107,6 +117,46 @@ def to_px(m, lon, lat):
     my = math.log(math.tan((90 + lat) * math.pi / 360)) * EARTH_C / math.pi
     return (m["ox"] + (mx - m["mA"]["x"]) * m["sx"],
             m["oy"] + (my - m["mA"]["y"]) * m["sy"])
+
+
+def bridge(walk, mpp):
+    """갈라진 조각을 가장 짧은 자리에서 이어 준다 (자동 횡단보도).
+
+    가장 큰 덩어리에서 각 픽셀까지의 거리를 한 번에 구하면(EDT), 다른 덩어리마다
+    '주 망에서 가장 가까운 자기 픽셀' 과 '그 반대편 주 망 픽셀' 이 바로 나온다.
+    그 둘을 잇는 띠를 그으면 그게 건너는 자리다.
+    """
+    w_px = max(1, int(round(BRIDGE_W_M / mpp / 2)))
+    added = 0
+    for _ in range(BRIDGE_ROUNDS):
+        lab, cnt = ndi.label(walk)
+        if cnt <= 1:
+            break
+        sizes = ndi.sum(walk, lab, range(1, cnt + 1))
+        main = int(np.argmax(sizes)) + 1
+        dist, idx = ndi.distance_transform_edt(lab != main, return_indices=True)
+        drew = 0
+        for c in range(1, cnt + 1):
+            if c == main:
+                continue
+            m = lab == c
+            d = np.where(m, dist, np.inf)
+            k = int(np.argmin(d))
+            if not np.isfinite(d.flat[k]) or d.flat[k] * mpp > BRIDGE_MAX_M:
+                continue
+            y0, x0 = divmod(k, walk.shape[1])
+            y1, x1 = idx[0, y0, x0], idx[1, y0, x0]
+            n = int(max(abs(x1 - x0), abs(y1 - y0))) + 1
+            for t in range(n + 1):
+                x = int(round(x0 + (x1 - x0) * t / n))
+                y = int(round(y0 + (y1 - y0) * t / n))
+                walk[max(0, y - w_px):y + w_px + 1, max(0, x - w_px):x + w_px + 1] = True
+            drew += 1
+        added += drew
+        if not drew:
+            break
+    print(f"  건너는 자리 {added}곳 자동으로 이음 ({BRIDGE_MAX_M:.0f} m 이내)")
+    return walk
 
 
 def main() -> None:
@@ -167,11 +217,15 @@ def main() -> None:
     print(f"  차로 가운데 {wide.sum() * mpp**2 / 10000:.1f} ha 제외 "
           f"(가장자리 {SIDEWALK_M} m 만 남김)")
 
-    # 범위를 자른다. 분석 대상 네 단지와 그 부대시설 둘레만 본다.
+    # 범위를 자른다. 분석 대상 네 단지와 그 부대시설, 그리고 목적지 둘레만 본다.
     near = ndi.binary_dilation(
         np.asarray(range_stamp, bool),
         ndi.generate_binary_structure(2, 2),
         iterations=int(round(RANGE_PAD_M / mpp)))
+    for lon, lat, rad in RANGE_POINTS:
+        cx, cy = to_px(meta, lon, lat)
+        yy, xx = np.ogrid[:h, :w]
+        near |= (xx - cx) ** 2 + (yy - cy) ** 2 <= (rad / mpp) ** 2
     walk &= near
     print(f"  범위 밖 제외 (대상 단지에서 {RANGE_PAD_M:.0f} m 안쪽만)")
 
@@ -181,6 +235,8 @@ def main() -> None:
         keep = np.flatnonzero(sizes >= MIN_BLOB_M2 / mpp**2) + 1
         walk = np.isin(lab, keep)
         print(f"  덩어리 {cnt} -> {len(keep)}개 (400 m2 미만 제거)")
+
+    walk = bridge(walk, mpp)
 
     # 길찾기는 이 마스크가 얼마나 하나로 이어져 있느냐가 전부다. 미리 알려 준다.
     lab, cnt = ndi.label(walk)
