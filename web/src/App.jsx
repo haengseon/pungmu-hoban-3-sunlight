@@ -49,9 +49,8 @@ const EMPTY = { type: 'FeatureCollection', features: [] }
 const EFFORT = [[5, '가깝다'], [10, '걸을 만하다'], [15, '조금 멀다'], [Infinity, '멀다']]
 const effortOf = (min) => EFFORT.find(([m]) => min <= m)[1]
 
-// 점선이 흐르는 속도. 대시 배열을 매 프레임 굴린다.
-const FLOW_PERIOD_MS = 900
-const WALKER_MS = 3600 // 진행 점이 경로를 한 번 완주하는 시간
+const WALKER_MS = 3600  // 진행 점이 경로를 한 번 완주하는 시간
+const COMET_SPAN = 0.18 // 흐르는 빛이 경로에서 차지하는 길이
 
 const PITCH = 45 // 열자마자 3D 인 게 보일 만큼은 눕히되, 그림자 바닥은 계속 읽히게
 // 위쪽은 넉넉하게: 기울인 화면에서 29층 타워는 자기 푸트프린트보다 한참 위까지 솟는다
@@ -330,12 +329,16 @@ export default function App() {
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#1f6feb', 'line-width': 5.5 },
       })
+      // 흐르는 빛은 **소스 데이터**로 움직인다. 대시 배열을 매 프레임 바꾸면 그때마다
+      // MapLibre 가 대시 텍스처를 새로 굽고, 그 GL 상태가 three.js 와 부딪혀 3D 가
+      // 깜빡인다. 짧은 토막 하나를 경로 위로 미끄러뜨리면 스타일은 건드릴 일이 없다.
+      map.addSource('routeComet', { type: 'geojson', data: EMPTY })
       map.addLayer({
-        id: 'route-flow',
+        id: 'route-comet',
         type: 'line',
-        source: 'route',
-        layout: { 'line-cap': 'butt' },
-        paint: { 'line-color': '#ffd54a', 'line-width': 5.5, 'line-dasharray': [0, 4, 3] },
+        source: 'routeComet',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#ffd54a', 'line-width': 7, 'line-blur': 1.5 },
       })
 
       layer = new Buildings3D(map, {
@@ -444,6 +447,7 @@ export default function App() {
     st.marker = null
     if (!r) {
       map.getSource('route').setData(EMPTY)
+      map.getSource('routeComet').setData(EMPTY)
       return undefined
     }
     map.getSource('route').setData({
@@ -457,7 +461,10 @@ export default function App() {
       .setLngLat(r.line[0]).addTo(map)
 
     const slow = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    if (slow) return () => { st.marker?.remove(); st.marker = null }
+    if (slow) {
+      map.getSource('routeComet').setData(EMPTY)
+      return () => { st.marker?.remove(); st.marker = null }
+    }
 
     // 점을 따라 움직이려면 각 마디 길이가 필요하다 (위경도라 위도 보정만 넣는다)
     const k = Math.cos(r.line[0][1] * Math.PI / 180)
@@ -469,19 +476,29 @@ export default function App() {
       total += Math.hypot(dx, dy)
       seg.push(total)
     }
-    const t0 = performance.now()
-    const tick = (t) => {
-      const phase = ((t - t0) % FLOW_PERIOD_MS) / FLOW_PERIOD_MS
-      // 대시 배열의 첫 칸을 늘였다 줄이며 점선을 흐르게 한다
-      map.setPaintProperty('route-flow', 'line-dasharray',
-        [phase * 7, 4, 3, 0.0001])
-      const u = ((t - t0) % WALKER_MS) / WALKER_MS * total
+    /** 경로 위 거리 u 에서의 좌표 */
+    const at = (u) => {
       let i = seg.findIndex((v) => v >= u)
       if (i < 0) i = seg.length - 1
       const prev = i ? seg[i - 1] : 0
       const f = (u - prev) / Math.max(seg[i] - prev, 1e-9)
       const a = r.line[i], b = r.line[i + 1] || a
-      st.marker.setLngLat([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f])
+      return { i, p: [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f] }
+    }
+    const comet = map.getSource('routeComet')
+    const span = total * COMET_SPAN
+    const t0 = performance.now()
+    const tick = (t) => {
+      const u = ((t - t0) % WALKER_MS) / WALKER_MS * total
+      const head = at(u)
+      const tail = at(Math.max(0, u - span))
+      // 꼬리와 머리 사이의 원래 점들을 그대로 끼워 넣어야 곡선을 탄다
+      const mid = r.line.slice(tail.i + 1, head.i + 1)
+      comet.setData({
+        type: 'Feature', properties: {},
+        geometry: { type: 'LineString', coordinates: [tail.p, ...mid, head.p] },
+      })
+      st.marker.setLngLat(head.p)
       st.raf = requestAnimationFrame(tick)
     }
     st.raf = requestAnimationFrame(tick)
@@ -489,6 +506,7 @@ export default function App() {
       cancelAnimationFrame(st.raf)
       st.marker?.remove()
       st.marker = null
+      map.getSource('routeComet')?.setData(EMPTY)
     }
   }, [ready, selKey])
 
@@ -549,7 +567,7 @@ export default function App() {
           )}
           {selKey && walkRoutes.routes[selKey] && (
             <div className="walk">
-              <b>풍무역 2번 출구</b>
+              <b>{walkRoutes.to.name}</b>
               <span>{walkRoutes.routes[selKey].metres.toLocaleString()} m</span>
               <span>도보 {Math.max(1, Math.round(walkRoutes.routes[selKey].seconds / 60))}분</span>
               <em>{effortOf(walkRoutes.routes[selKey].seconds / 60)}</em>

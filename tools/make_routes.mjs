@@ -1,4 +1,4 @@
-// 동마다 풍무역 2번 출구까지 걸어가는 길을 미리 구워 둔다.
+// 동마다 풍무역 1번 출구까지 걸어가는 길을 미리 구워 둔다.
 //
 //   node tools/make_routes.mjs      -> web/src/data/routes.json
 //
@@ -17,7 +17,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const EARTH_C = 20037508.342789244
 
 // tools/trace_kakao.mjs 로 찍은 카카오 캡처에서 읽은 자리다 (level 1, 0.25 m/px)
-const TARGET = { name: '풍무역 2번 출구', at: [126.7319431, 37.6124640] }
+const TARGET = { name: '풍무역 1번 출구', at: [126.7322535, 37.6128162] }
 
 // 성인 평균 보행 속도. 신호 설계 기준(1.0)보다 빠르고 분양 광고 관행(80 m/분,
 // 1.33)보다 느리다. 광고와 숫자가 다른 이유가 여기 있다.
@@ -52,14 +52,45 @@ const toLonLat = (x, y) => {
   ]
 }
 
-/** 가장 가까운 걸을 수 있는 칸 */
+// 걸을 수 있는 면을 성분으로 나눠 가장 큰 것을 골라 둔다. 그냥 '가장 가까운 걸을 수
+// 있는 칸' 에 붙이면 라벨 테두리 같은 고립된 조각에 걸려, 목적지가 거기 붙는 순간
+// 모든 동이 도달 불가로 나온다.
+const comp = new Int32Array(W * H).fill(-1)
+let mainComp = -1
+{
+  const sizes = []
+  for (let s0 = 0; s0 < W * H; s0++) {
+    if (!walk[s0] || comp[s0] >= 0) continue
+    const id = sizes.length
+    const q = [s0]
+    comp[s0] = id
+    for (let head = 0; head < q.length; head++) {
+      const i = q[head]
+      const x = i % W, y = (i - x) / W
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx, ny = y + dy
+          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue
+          const j = ny * W + nx
+          if (walk[j] && comp[j] < 0) { comp[j] = id; q.push(j) }
+        }
+      }
+    }
+    sizes.push(q.length)
+  }
+  mainComp = sizes.indexOf(Math.max(...sizes))
+  console.log(`보행망 ${sizes.length}개 성분, 주 망 `
+    + `${(Math.max(...sizes) * MPP ** 2 / 1e4).toFixed(1)} ha`)
+}
+
+/** 가장 가까운, 주 보행망 위의 칸 */
 function snap(x, y) {
   const seen = new Uint8Array(W * H)
   const q = [Math.round(y) * W + Math.round(x)]
   seen[q[0]] = 1
   for (let head = 0; head < q.length && head < 4e6; head++) {
     const i = q[head]
-    if (walk[i]) return i
+    if (walk[i] && comp[i] === mainComp) return i
     const px = i % W, py = (i - px) / W
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const nx = px + dx, ny = py + dy
@@ -196,6 +227,11 @@ for (const e of [...dongs.values()].sort((a, b) => a.key.localeCompare(b.key))) 
 }
 
 lens.sort((a, b) => a - b)
+if (!lens.length) {
+  console.error(`목적지(${TARGET.name})에서 갈 수 있는 동이 하나도 없다 - `
+    + '보행망이 끊겼는지 보라')
+  process.exit(1)
+}
 console.log(`동 ${lens.length}개 - 거리 최소 ${lens[0].toFixed(0)} m / `
   + `중앙 ${lens[lens.length >> 1].toFixed(0)} m / 최대 ${lens[lens.length - 1].toFixed(0)} m`)
 if (missing.length) console.log(`보행망에 안 닿는 동 ${missing.length}개: ${missing.join(', ')}`)
