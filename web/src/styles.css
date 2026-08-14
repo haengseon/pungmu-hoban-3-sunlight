@@ -261,6 +261,13 @@ header h1 {
 .walk b { font-weight: 700; }
 .walk span { color: rgba(255, 255, 255, 0.85); }
 .walk em { font-style: normal; font-weight: 700; color: #ffd54a; }
+/* 두 번째 길. 지도에서 회색 점선인 그 길이라는 게 읽히게 같은 결로 흐리게 둔다 */
+.walk i {
+  font-style: normal;
+  padding-left: 0.55em;
+  border-left: 1px solid rgba(255, 255, 255, 0.35);
+  color: rgba(255, 255, 255, 0.72);
+}
 
 /* 경로를 따라 걷는 점 */
 .walker {

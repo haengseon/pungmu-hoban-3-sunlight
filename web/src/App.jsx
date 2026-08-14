@@ -311,8 +311,23 @@ export default function App() {
         paint: { 'line-color': '#d9451d', 'line-width': 2.5, 'line-dasharray': [3, 2] },
       })
 
-      // 도보 경로. 세 겹으로 그린다 - 바깥 발광, 본선, 그 위를 흐르는 점선.
-      // Buildings3D 보다 **먼저** 얹어 건물에 가려지게 한다. 지면을 걷는 길이니까.
+      layer = new Buildings3D(map, {
+        buildings: geom.buildings, lat0: geom.lat, lon0: geom.lon,
+      })
+      // 경로는 건물보다 **위**에 그린다. 두 길을 견주는 게 목적인데, 단지를 가로지르는
+      // 길은 지면에 깔면 타워 뒤로 숨어 버려 비교가 안 된다.
+      // 두 번째 길은 최단 아래에 깔아 흐릿하게 둔다 - 어느 쪽이 최단인지 한눈에 보이게.
+      map.addSource('routeAlt', { type: 'geojson', data: EMPTY })
+      map.addLayer({
+        id: 'route-alt',
+        type: 'line',
+        source: 'routeAlt',
+        // 점선은 line-cap 이 round 면 안 그려진다. butt 여야 한다.
+        layout: { 'line-cap': 'butt', 'line-join': 'round' },
+        paint: { 'line-color': '#5b6472', 'line-width': 4.5, 'line-opacity': 0.9,
+          'line-dasharray': [2.5, 1.6] },
+      })
+
       map.addSource('route', { type: 'geojson', data: EMPTY })
       map.addLayer({
         id: 'route-glow',
@@ -341,9 +356,6 @@ export default function App() {
         paint: { 'line-color': '#ffd54a', 'line-width': 7, 'line-blur': 1.5 },
       })
 
-      layer = new Buildings3D(map, {
-        buildings: geom.buildings, lat0: geom.lat, lon0: geom.lon,
-      })
       layerRef.current = layer
       window.__layer = layer
       setReady(true)
@@ -447,9 +459,14 @@ export default function App() {
     st.marker = null
     if (!r) {
       map.getSource('route').setData(EMPTY)
+      map.getSource('routeAlt').setData(EMPTY)
       map.getSource('routeComet').setData(EMPTY)
       return undefined
     }
+    map.getSource('routeAlt').setData(r.alt ? {
+      type: 'Feature', properties: {},
+      geometry: { type: 'LineString', coordinates: r.alt.line },
+    } : EMPTY)
     map.getSource('route').setData({
       type: 'Feature', properties: {},
       geometry: { type: 'LineString', coordinates: r.line },
@@ -571,6 +588,10 @@ export default function App() {
               <span>{walkRoutes.routes[selKey].metres.toLocaleString()} m</span>
               <span>도보 {Math.max(1, Math.round(walkRoutes.routes[selKey].seconds / 60))}분</span>
               <em>{effortOf(walkRoutes.routes[selKey].seconds / 60)}</em>
+              {walkRoutes.routes[selKey].alt && (
+                <i>다른 길 {walkRoutes.routes[selKey].alt.metres.toLocaleString()} m
+                  {' · '}{Math.max(1, Math.round(walkRoutes.routes[selKey].alt.seconds / 60))}분</i>
+              )}
             </div>
           )}
           {hidden.size > 0 && (

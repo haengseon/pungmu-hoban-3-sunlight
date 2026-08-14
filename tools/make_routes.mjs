@@ -27,6 +27,13 @@ const CROSS_WAIT_S = 30
 const SIMPLIFY_M = 3      // 폴리라인 단순화 - 격자 그대로면 점이 수천 개다
 const MAX_ENTRANCE_M = 60 // 출입점이 이보다 멀면 그 동은 보행망에 안 닿은 것이다
 
+// 두 번째 길. 최단 경로 둘레에 불이익을 주고 다시 찾으면 '의미 있게 다른' 길이 나온다.
+// 단지를 가로지르는 지름길과 큰길을 도는 길처럼, 실제로 사람이 저울질하는 두 갈래다.
+const ALT_PENALTY = 4      // 최단 경로 둘레를 지날 때의 비용 배수
+const ALT_NEAR_M = 22      // 그 둘레의 폭
+const ALT_MIN_DIFF = 0.12  // 최단보다 이만큼도 안 다르면 같은 길로 본다
+const ALT_MAX_RATIO = 1.9  // 최단의 이 배를 넘으면 대안이라 할 수 없다
+
 const meta = JSON.parse(readFileSync(join(ROOT, 'web/src/data/walk.json'), 'utf8'))
 const png = PNG.sync.read(readFileSync(join(ROOT, 'web/public/walk_mask.png')))
 const W = png.width, H = png.height
@@ -201,6 +208,99 @@ function simplify(pts, tol) {
   return pts.filter((_, i) => keep[i])
 }
 
+// --- 두 번째 길 ------------------------------------------------------------
+// 격자가 2000만 칸이라 매번 Infinity 로 다시 채우면 그것만으로 느리다. 세대 번호를
+// 찍어 두고 번호가 다르면 '아직 안 본 칸' 으로 친다.
+const altG = new Float64Array(W * H)
+const altGen = new Int32Array(W * H)
+const altPrev = new Int32Array(W * H)
+const penal = new Uint8Array(W * H)
+const penalGen = new Int32Array(W * H)
+let gen = 0
+
+/** 최단 경로를 피해 가는 길. 없으면 null */
+function altRoute(from, to, primary) {
+  gen++
+  const r = Math.round(ALT_NEAR_M / MPP)
+  const step = Math.max(1, r >> 1)
+  for (let k = 0; k < primary.length; k += step) {
+    const [cx, cy] = primary[k]
+    for (let dy = -r; dy <= r; dy++) {
+      const yy = cy + dy
+      if (yy < 0 || yy >= H) continue
+      const dx = Math.floor(Math.sqrt(r * r - dy * dy))
+      for (let x = Math.max(0, cx - dx); x <= Math.min(W - 1, cx + dx); x++) {
+        const i = yy * W + x
+        penalGen[i] = gen
+        penal[i] = 1
+      }
+    }
+  }
+  const tx = to % W, ty = (to - tx) / W
+  const heap = [{ i: from, f: 0 }]
+  altGen[from] = gen
+  altG[from] = 0
+  altPrev[from] = -1
+  const push = (n) => {
+    heap.push(n)
+    let c = heap.length - 1
+    while (c > 0) {
+      const p = (c - 1) >> 1
+      if (heap[p].f <= heap[c].f) break
+      ;[heap[p], heap[c]] = [heap[c], heap[p]]
+      c = p
+    }
+  }
+  const pop = () => {
+    const top = heap[0], last = heap.pop()
+    if (heap.length) {
+      heap[0] = last
+      let p = 0
+      for (;;) {
+        const l = p * 2 + 1, rr = l + 1
+        let m = p
+        if (l < heap.length && heap[l].f < heap[m].f) m = l
+        if (rr < heap.length && heap[rr].f < heap[m].f) m = rr
+        if (m === p) break
+        ;[heap[p], heap[m]] = [heap[m], heap[p]]
+        p = m
+      }
+    }
+    return top
+  }
+  const shutGen = new Int32Array(W * H)
+  while (heap.length) {
+    const { i } = pop()
+    if (shutGen[i] === gen) continue
+    shutGen[i] = gen
+    if (i === to) break
+    const x = i % W, y = (i - x) / W
+    for (const [dx, dy, w] of D8) {
+      const nx = x + dx, ny = y + dy
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue
+      const j = ny * W + nx
+      if (!walk[j] || shutGen[j] === gen) continue
+      const cost = w * (penalGen[j] === gen && penal[j] ? ALT_PENALTY : 1)
+      const ng = altG[i] + cost
+      if (altGen[j] !== gen || ng < altG[j]) {
+        altGen[j] = gen
+        altG[j] = ng
+        altPrev[j] = i
+        push({ i: j, f: ng + Math.hypot(tx - nx, ty - ny) })
+      }
+    }
+  }
+  if (altGen[to] !== gen) return null
+  const px = []
+  for (let i = to; i !== -1; i = altPrev[i]) px.push([i % W, (i - i % W) / W])
+  // 실제 길이는 불이익을 뺀 값으로 다시 잰다
+  let real = 0
+  for (let k = 1; k < px.length; k++) {
+    real += Math.hypot(px[k][0] - px[k - 1][0], px[k][1] - px[k - 1][1])
+  }
+  return { px: px.reverse(), metres: real * MPP }
+}
+
 const routes = {}
 const lens = []
 const missing = []
@@ -217,11 +317,25 @@ for (const e of [...dongs.values()].sort((a, b) => a.key.localeCompare(b.key))) 
   for (let i = from; i !== -1; i = next[i]) px.push([i % W, (i - i % W) / W])
   const metres = dist[from] * MPP
   const line = simplify(px, SIMPLIFY_M / MPP).map(([x, y]) => toLonLat(x + 0.5, y + 0.5))
+  const alt = altRoute(from, start, px)
+  let altOut = null
+  if (alt) {
+    const ratio = alt.metres / metres
+    // 최단과 거의 같은 길이거나, 터무니없이 돌면 두 번째 길이라 할 수 없다
+    if (ratio > 1 + ALT_MIN_DIFF && ratio <= ALT_MAX_RATIO) {
+      altOut = {
+        metres: Math.round(alt.metres),
+        seconds: Math.round(alt.metres / SPEED_MPS),
+        line: simplify(alt.px, SIMPLIFY_M / MPP).map(([x, y]) => toLonLat(x + 0.5, y + 0.5)),
+      }
+    }
+  }
   routes[e.key] = {
     dong: e.dong,
     metres: Math.round(metres),
     seconds: Math.round(metres / SPEED_MPS),
     line,
+    alt: altOut,
   }
   lens.push(metres)
 }
