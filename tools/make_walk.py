@@ -89,6 +89,12 @@ BUILDING_PAD_M = 1.5
 # 자동으로는 못 잇는다 - 편집기에서 손으로 칠하라는 뜻이고, 그러라고 만든 것이다.
 SIDEWALK_M = 6.0
 
+# 지구는 아직 대부분 나대지라, 카카오에는 앞으로 날 길이 안 그려져 있다. 그대로 두면
+# 완공 뒤 300 m 면 갈 거리가 1.2 km 로 나온다(호반2차에서 역까지 단지를 한 바퀴 돈다).
+# 토지이용계획에서 **지구 안에서 어느 필지에도 속하지 않는 공간** 을 뽑으면 그게 곧
+# 계획 도로다. 그걸 보행망에 넣어 '완공 뒤 걷는 거리' 를 낸다.
+LANDUSE = os.path.join(ROOT, "web", "public", "landuse.json")
+
 # 다 칠할 필요 없다. 더마크·풍무 1~3차와 그 주변 상가까지가 범위다.
 RANGE_PAD_M = 200.0
 # 목적지(풍무역 2번 출구)도 범위에 들어와야 한다. trace.html 캡처에서 찍은 좌표다.
@@ -117,6 +123,27 @@ def to_px(m, lon, lat):
     my = math.log(math.tan((90 + lat) * math.pi / 360)) * EARTH_C / math.pi
     return (m["ox"] + (mx - m["mA"]["x"]) * m["sx"],
             m["oy"] + (my - m["mA"]["y"]) * m["sy"])
+
+
+def planned_roads(meta, w, h):
+    """지구 안에서 어느 필지에도 속하지 않는 공간 = 앞으로 날 도로."""
+    if not os.path.exists(LANDUSE):
+        return None
+    fc = json.load(open(LANDUSE, encoding="utf-8"))
+    district = Image.new("1", (w, h), 0)
+    lots = Image.new("1", (w, h), 0)
+    dd, ld = ImageDraw.Draw(district), ImageDraw.Draw(lots)
+    for f in fc["features"]:
+        if f["geometry"]["type"] != "Polygon":
+            continue
+        ring = [to_px(meta, lon, lat) for lon, lat in f["geometry"]["coordinates"][0]]
+        if f["properties"].get("use") == "도시개발구역":
+            dd.polygon(ring, fill=1)
+        else:
+            ld.polygon(ring, fill=1)
+    road = np.asarray(district, bool) & ~np.asarray(lots, bool)
+    # 필지 폴리곤은 직선으로 갈아 낀 근사라 경계에 얇은 틈이 남는다. 열어서 턴다.
+    return ndi.binary_opening(road, np.ones((5, 5)))
 
 
 def bridge(walk, mpp):
@@ -208,6 +235,11 @@ def main() -> None:
     k_open = max(1, int(round(OPEN_M / mpp)))
     walk = ndi.binary_opening(walk, np.ones((k_open, k_open)))
     walk = ndi.binary_closing(walk, np.ones((k_close, k_close)))
+
+    planned = planned_roads(meta, w, h)
+    if planned is not None:
+        walk |= planned & ~built
+        print(f"  계획 도로 {planned.sum() * mpp**2 / 10000:.1f} ha 추가")
     walk &= ~built     # 닫으면서 건물을 다시 먹었을 수 있다
 
     # 차로 가운데를 판다. 가장자리에서 SIDEWALK_M 안쪽만 남긴다.
