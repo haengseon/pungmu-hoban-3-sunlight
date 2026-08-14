@@ -224,14 +224,15 @@ header h1 {
   display: flex;
   align-items: center;
   gap: 0.4em;
-  padding: 0.22em 0.6em 0.22em 0.45em;
+  padding: 0.2em 0.55em 0.2em 0.4em;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(70, 78, 90, 0.2);
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.12);
+  background: rgba(255, 255, 255, 0.52);
+  border: 1px solid rgba(70, 78, 90, 0.14);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
   /* 글자까지 옅게. 이름표는 어디까지나 배경 정보라 3D 를 가리면 안 된다 */
-  color: rgba(42, 47, 54, 0.8);
-  font-size: clamp(10px, 2.6vw, 12px);
+  color: rgba(42, 47, 54, 0.62);
+  /* 3D 가 주인공이라 이름표는 읽히기만 하면 된다. 지도 라벨보다 한 단계 작게. */
+  font-size: clamp(7px, 1.8vw, 9px);
   font-weight: 600;
   white-space: nowrap;
   pointer-events: none;
@@ -239,7 +240,7 @@ header h1 {
 }
 .lot-tag::before {
   content: '';
-  width: 7px; height: 7px;
+  width: 5px; height: 5px;
   border-radius: 50%;
   background: var(--tag);
 }
@@ -249,14 +250,14 @@ header h1 {
 .block-tag {
   display: flex;
   align-items: baseline;
-  gap: 0.4em;
-  padding: 0.24em 0.65em;
+  gap: 0.35em;
+  padding: 0.22em 0.6em;
   border-radius: 999px;
-  background: rgba(32, 38, 46, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.18);
-  color: rgba(255, 255, 255, 0.8);
-  font-size: clamp(10px, 2.6vw, 12px);
+  background: rgba(32, 38, 46, 0.52);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: clamp(7px, 1.8vw, 9px);
   white-space: nowrap;
   pointer-events: none;
 }
@@ -265,7 +266,7 @@ header h1 {
   border-color: rgba(190, 240, 230, 0.3);
 }
 .block-tag b { font-weight: 800; letter-spacing: 0.02em; }
-.block-tag span { color: rgba(255, 255, 255, 0.78); font-weight: 500; }
+.block-tag span { color: rgba(255, 255, 255, 0.62); font-weight: 500; }
 
 /* ------------------------------------------------------------------ 경고문 */
 /* 지도가 아무리 그럴듯해도 파생 데이터로 만든 추정이다. 그 사실이 화면에서 사라지면
@@ -317,13 +318,65 @@ header h1 {
   font-size: var(--fs-small);
   font-weight: 600;
 }
+/* 화살표는 '메뉴가 갈 방향' 이다. 펼쳐져 있으면 누르는 순간 메뉴가 아래로 사라지고,
+   접혀 있으면 아래에서 다시 올라온다. */
 .fold i {
   width: 0.62em; height: 0.62em;
   border-right: 2px solid currentColor;
   border-bottom: 2px solid currentColor;
-  transform: translateY(-0.12em) rotate(-135deg);
+  transform: translateY(-0.1em) rotate(45deg);
+  transition: transform 0.28s ease;
 }
-.wrap.wide .fold i { transform: translateY(0.1em) rotate(45deg); }
+.wrap.wide .fold i { transform: translateY(0.1em) rotate(-135deg); }
+
+/* '지도 크게보기' 로 접히는 것들. 지도 말고는 전부 비켜 준다 - 제목도, 경고문도,
+   슬라이더 위 시각 숫자도. 높이를 0 으로 접고 여백까지 같이 걷어야 빈 줄이 안 남는다.
+   경고문은 여는 순간 다시 보이므로 '한 번은 반드시 읽힌다' 는 성질은 지켜진다. */
+header, .warn, .big, .credit {
+  max-height: 8em;
+  overflow: hidden;
+  transition: max-height 0.28s ease, opacity 0.2s ease,
+    margin 0.28s ease, padding 0.28s ease;
+}
+.wrap.wide header,
+.wrap.wide .warn,
+.wrap.wide .big,
+.wrap.wide .credit {
+  max-height: 0;
+  opacity: 0;
+  margin: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-width: 0;
+  pointer-events: none;
+}
+/* 접히면 앞뒤 flex gap 이 빈 줄로 남는다 */
+.wrap.wide header, .wrap.wide .warn { margin-bottom: calc(var(--gap) * -1); }
+
+/* 접히는 아래 메뉴. 조건부로 지웠다 되살리면 툭 끊겨서, 늘 그려 두고 높이만 접는다.
+   grid-template-rows 를 1fr <-> 0fr 로 두면 내용 높이를 몰라도 애니메이션이 붙는다. */
+.sheet {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.28s ease, opacity 0.2s ease, margin 0.28s ease;
+}
+.sheet > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-height: 0;
+  overflow: hidden;
+}
+.wrap.wide .sheet {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  /* 접힌 뒤에도 flex gap 이 남아 빈 줄이 생긴다. 그만큼 당겨 준다. */
+  margin-bottom: calc(var(--gap) * -1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheet, .fold i, header, .warn, .big, .credit { transition: none; }
+}
 
 /* --------------------------------------------------------------------- map */
 .mapbox {
@@ -365,7 +418,9 @@ header h1 {
 /* 드롭다운에 3차 동만 있는 까닭 */
 .pick-note {
   flex: 0 0 auto;
-  margin: calc(var(--gap) * -0.6) 0 0;
+  /* 접히는 상자 안에 있다. 음수 마진으로 위로 당기면 그 부분이 잘려 나간다
+     (.sheet > div 이 overflow: hidden). 간격은 상자의 gap 이 준다. */
+  margin: 0;
   color: var(--tx2);
   font-size: var(--fs-small);
 }

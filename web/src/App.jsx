@@ -491,8 +491,20 @@ export default function App() {
         </div>
       </div>
 
-      {!wide && (
-        <>
+      <div className="sheet" aria-hidden={wide} inert={wide ? '' : undefined}>
+        <div>
+          <div className="seasons">
+            {SEASONS.map((s) => (
+              <button
+                key={s.id}
+                className={s.id === season ? 'on' : ''}
+                onClick={() => setSeason(s.id)}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+
           {/* 주변 단지는 그림자를 드리우는 역할만 한다. 드롭다운에 3차 동만 있는
               이유를 모르면 "왜 저 단지는 안 나오지" 로 읽히므로 미리 말해 준다. */}
           <p className="pick-note">동·호수 선택은 <b>{SUBJECT.name}</b> 만 가능합니다. 주변 단지는 그림자만 계산합니다.</p>
@@ -528,21 +540,10 @@ export default function App() {
                 ))}
             </select>
           </div>
-      <div className="seasons">
-            {SEASONS.map((s) => (
-              <button
-                key={s.id}
-                className={s.id === season ? 'on' : ''}
-                onClick={() => setSeason(s.id)}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+        </div>
+      </div>
 
-      {!wide && <p className="credit">만든이 : 호반써밋3 어흥</p>}
+      <p className="credit">만든이 : 호반써밋3 어흥</p>
     </div>
   )
 }

@@ -77,12 +77,16 @@ export class Buildings3D {
     this.sel = null // {dong, complexId, floor}
     this.hidden = new Set() // "complexId|dong"
 
-    // local ENU metres -> mercator
+    // local ENU metres -> mercator.
+    // x·y 만 메르카토르로 바꾼다. z 는 미터 그대로 둔다 - maplibre 의 MVP 는 높이를
+    // 미터로 받는다 (행렬이 이미 픽셀/미터를 물고 있다). 여기서 z 까지 메르카토르로
+    // 바꾸고 render 에서 월드픽셀 배율을 또 곱하면 높이에만 배율이 한 번 더 붙어,
+    // 확대할수록 건물이 치솟고 축소하면 납작해진다.
     const o = MercatorCoordinate.fromLngLat([data.lon0, data.lat0], 0)
     const s = o.meterInMercatorCoordinateUnits()
     this.model = new THREE.Matrix4()
       .makeTranslation(o.x, o.y, o.z)
-      .scale(new THREE.Vector3(s, -s, s)) // mercator y grows south
+      .scale(new THREE.Vector3(s, -s, 1)) // mercator y grows south, z 는 미터
     const toLocal = ([lon, lat]) => {
       const m = MercatorCoordinate.fromLngLat([lon, lat], 0)
       return new THREE.Vector2((m.x - o.x) / s, -(m.y - o.y) / s)
@@ -225,7 +229,7 @@ export class Buildings3D {
     const cam = this.camera
     cam.projectionMatrix
       .fromArray(modelViewProjectionMatrix)
-      .multiply(this.zoomScale.makeScale(ws, ws, ws))
+      .multiply(this.zoomScale.makeScale(ws, ws, 1))
       .multiply(this.model)
     cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert()
     this.renderer.resetState()
