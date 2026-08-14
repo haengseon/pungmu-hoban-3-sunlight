@@ -119,6 +119,11 @@ let mainComp = -1
     + `성분 ${sizes.length}개, 가장 큰 것 ${(Math.max(...sizes) * MPP ** 2 / 1e4).toFixed(1)} ha`)
 }
 
+// 출입점이 이보다 멀면 그 동은 주 보행망에 닿아 있지 않은 것이다. 이 가드가 없으면
+// 망이 조각났을 때 출입점이 한참 떨어진 조각에 붙어, 엉뚱하게 짧은 거리가 나오며
+// 검사가 거짓 통과한다.
+const MAX_ENTRANCE_M = 60
+
 /** 그 동에서 걸어 나오는 지점 - 무게중심에서 가장 가까운, 주 보행망 위의 픽셀 */
 function entrance(b) {
   const seen = new Uint8Array(W * H)
@@ -217,7 +222,7 @@ const find = (id) => {
 const PAIRS = [
   ['같은 단지 안', 'hoban3|401', 'hoban3|408'],
   ['단지 사이', 'hoban3|401', 'prugio|301'],
-  ['지구 건너', 'hoban3|401', 'grascent1|201'],
+  ['지구 건너', 'hoban3|401', 'hoban2|1501'],
 ]
 
 const routes = []
@@ -226,8 +231,12 @@ let warn = 0
 for (const [label, a, b] of PAIRS) {
   const A = find(a), B = find(b)
   const ea = entrance(A), eb = entrance(B)
-  if (ea < 0 || eb < 0) {
-    console.log(`${label} ${a} -> ${b}: 출입점을 못 찾았다`)
+  const away = (e, b) => e < 0 ? Infinity
+    : Math.hypot(e % W - b.cx, (e - e % W) / W - b.cy) * MPP
+  const da = away(ea, A), db = away(eb, B)
+  if (da > MAX_ENTRANCE_M || db > MAX_ENTRANCE_M) {
+    console.log(`${label} ${a} -> ${b}: 주 보행망에 닿지 않는다 `
+      + `(출입점까지 ${da.toFixed(0)} m / ${db.toFixed(0)} m)`)
     bad++
     continue
   }
