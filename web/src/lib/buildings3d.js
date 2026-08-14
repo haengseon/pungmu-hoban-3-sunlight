@@ -40,7 +40,7 @@ const PLANNED = 0x5fbfae
 const AMBIENT = 1.5
 const SUN_I = Math.PI - AMBIENT
 const GROUND_SHADOW = 0.34
-// 그림자는 멀어질수록, 그리고 해가 낮을수록 흐려진다.
+// 그림자는 해가 낮을수록 흐려진다.
 //
 // 계산은 h/tan(고도) 라 고도가 0 에 가까우면 발산한다 - 겨울 8시(고도 1.9°)면 110 m
 // 짜리가 3.3 km 를 드리운다. 계산 자체는 맞지만 현실은 다르다: 평평한 무한 지면이
@@ -49,9 +49,6 @@ const GROUND_SHADOW = 0.34
 // 본다 - 8시 이전은 애초에 판단 구간이 아니다.
 //
 // 그래서 물리는 그대로 두고 **보이는 진하기만** 줄인다.
-const FADE_NEAR = 0.35   // 그림자 길이의 이 지점까지는 그대로
-const FADE_FAR = 1.0     // 끝에서 이만큼 남는다
-const FADE_MIN = 0.12
 // 해 뜨고 지는 앞뒤 30분쯤은 그림자를 그리지 않는다. 그 각도(4~5°)에서 계산대로면
 // 110 m 짜리가 1.3 km 를 드리우는데, 실제로는 사이의 건물·지형이 끊고 직사광도
 // 산란광에 묻혀 그런 그늘이 지지 않는다. 건축법이 보는 동지 09~15시는 11.4° 이상이라
@@ -312,13 +309,9 @@ export class Buildings3D {
     const cy = (y0 + y1) / 2
     this.ground.scale.set(x1 - x0, y1 - y0, 1)
     this.ground.position.set(cx, cy, 0)
-    // 감쇠는 그림자 길이에 맞춰 늘어난다. 해가 낮을수록 전체도 옅어진다.
+    // 해가 낮을수록 전체가 옅어진다.
     const u = this.ground.material.userData.u
     if (u) {
-      const site = Math.max(this.bbox.x1 - this.bbox.x0, this.bbox.y1 - this.bbox.y0) / 2
-      u.uCentre.value.set((this.bbox.x0 + this.bbox.x1) / 2, (this.bbox.y0 + this.bbox.y1) / 2)
-      u.uNear.value = site + reach * FADE_NEAR
-      u.uFar.value = site + reach * FADE_FAR
       u.uLow.value = day
         ? Math.max(0, Math.min(1, (altitude - SHADOW_CUT_DEG)
           / (SHADOW_FADE_DEG - SHADOW_CUT_DEG)))
@@ -411,36 +404,20 @@ export class Buildings3D {
 }
 
 /**
- * 지면 그림자. ShadowMaterial 의 알파에 '중심에서 멀어질수록 옅어지는' 항을 곱한다.
- * uniform 세 개로 조절한다 - 중심, 감쇠 시작/끝 반경, 저각 보정.
+ * 지면 그림자. ShadowMaterial 의 알파에 저각 보정(uLow)만 곱한다. 거리에 따른
+ * 감쇠는 두지 않는다 - 그림자는 어디서나 같은 진하기다.
  */
 function groundShadowMaterial() {
   const m = new THREE.ShadowMaterial({ opacity: GROUND_SHADOW, depthWrite: false })
-  m.userData.u = {
-    uCentre: { value: new THREE.Vector2() },
-    uNear: { value: 200 },
-    uFar: { value: 800 },
-    uLow: { value: 1 },
-  }
+  m.userData.u = { uLow: { value: 1 } }
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, m.userData.u)
-    sh.vertexShader = sh.vertexShader
-      .replace('void main() {', `varying vec2 vGround;
-void main() {`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>
-  vGround = (modelMatrix * vec4(position, 1.0)).xy;`)
     sh.fragmentShader = sh.fragmentShader
-      .replace('void main() {', `varying vec2 vGround;
-uniform vec2 uCentre;
-uniform float uNear;
-uniform float uFar;
-uniform float uLow;
+      .replace('void main() {', `uniform float uLow;
 void main() {`)
       .replace(
         'gl_FragColor = vec4( color, opacity * ( 1.0 - getShadowMask() ) );',
-        `float d = distance( vGround, uCentre );
-  float f = mix( 1.0, ${FADE_MIN.toFixed(2)}, clamp( ( d - uNear ) / max( uFar - uNear, 1.0 ), 0.0, 1.0 ) );
-  gl_FragColor = vec4( color, opacity * uLow * f * ( 1.0 - getShadowMask() ) );`,
+        'gl_FragColor = vec4( color, opacity * uLow * ( 1.0 - getShadowMask() ) );',
       )
   }
   return m
